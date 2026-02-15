@@ -4,6 +4,7 @@
   const pdfjsLib = window.pdfjsLib || window["pdfjs-dist/build/pdf"];
   const fabricLib = window.fabric;
   const pdfLib = window.PDFLib;
+  const pdfLibFontkit = window.fontkit || null;
   const tesseractLib = window.Tesseract;
 
   if (!pdfjsLib || !fabricLib || !pdfLib) {
@@ -16,7 +17,12 @@
 
   const CREATE_TOOLS = new Set(["text", "rect", "ellipse", "line"]);
   const DEFAULT_DETECTED_TEXT_COLOR = "#111827";
+  const EXPORT_OVERLAY_MULTIPLIER = 6;
+  const EXACT_EXPORT_HEALTH_URL = "http://127.0.0.1:8787/api/health";
+  const EXACT_EXPORT_URL = "http://127.0.0.1:8787/api/export-exact";
   const STORAGE_LANGUAGE_KEY = "stickerPdfLabLang";
+  const cssFontFaceSrcCache = new Map();
+  const cssFontFaceBytesCache = new Map();
   let initialLanguage = "en";
   try {
     if (window.localStorage.getItem(STORAGE_LANGUAGE_KEY) === "ko") {
@@ -61,12 +67,15 @@
       undo: "↩️ Undo",
       redo: "↪️ Redo",
       clear_page: "🧹 Clear Page",
+      preview_before: "🪞 Before",
+      preview_after: "🪞 After",
       zoom: "🔍 Zoom",
       fit: "Fit",
       drop_hint: "Drop a PDF here or click Open PDF",
       ready: "Ready",
       properties: "Properties",
       svg_page: "🧩 SVG",
+      split_page: "✂️ Split PDF",
       stroke: "Stroke",
       fill: "Fill",
       fill_opacity: "Fill Opacity",
@@ -84,6 +93,17 @@
       clear: "🧹 Clear",
       merge_ranges: "Merge all ranges into one PDF",
       split_extract: "✂️ Split / Extract",
+      text_tune_heading: "🧠 Text Match",
+      letter_spacing: "Letter Spacing",
+      auto_match_all: "🧲 Auto-Match All",
+      vector_text_export: "Use vector text export",
+      font_inspector_heading: "🔎 Font Inspector",
+      font_inspector_original: "Original",
+      font_inspector_export: "Export",
+      font_inspector_empty: "Select a text box to inspect font substitution.",
+      font_inspector_unavailable: "No editable text selected.",
+      font_inspector_embedded: "Embedded as {font}.",
+      font_inspector_fallback: "Fallback to {font} for export.",
       page_zero: "Page 0 / 0",
       page_position: "Page {current} / {total}",
       page_count: "{count} pages",
@@ -134,12 +154,15 @@
       undo: "↩️ 실행 취소",
       redo: "↪️ 다시 실행",
       clear_page: "🧹 페이지 비우기",
+      preview_before: "🪞 이전 보기",
+      preview_after: "🪞 편집 보기",
       zoom: "🔍 확대/축소",
       fit: "맞춤",
       drop_hint: "여기에 PDF를 놓거나 'PDF 열기'를 클릭하세요",
       ready: "준비됨",
       properties: "속성",
       svg_page: "🧩 SVG",
+      split_page: "✂️ PDF 분할",
       stroke: "선",
       fill: "채우기",
       fill_opacity: "채우기 투명도",
@@ -157,6 +180,17 @@
       clear: "🧹 초기화",
       merge_ranges: "모든 범위를 하나의 PDF로 병합",
       split_extract: "✂️ 분할 / 추출",
+      text_tune_heading: "🧠 텍스트 매칭",
+      letter_spacing: "자간",
+      auto_match_all: "🧲 전체 자동 보정",
+      vector_text_export: "벡터 텍스트 내보내기 사용",
+      font_inspector_heading: "🔎 폰트 분석기",
+      font_inspector_original: "원본",
+      font_inspector_export: "내보내기",
+      font_inspector_empty: "텍스트 박스를 선택하면 폰트 대체 정보를 볼 수 있습니다.",
+      font_inspector_unavailable: "선택된 편집 텍스트가 없습니다.",
+      font_inspector_embedded: "{font} 폰트로 임베드됩니다.",
+      font_inspector_fallback: "내보내기 시 {font}로 대체됩니다.",
       page_zero: "페이지 0 / 0",
       page_position: "페이지 {current} / {total}",
       page_count: "{count}페이지",
@@ -201,6 +235,13 @@
     "isMoveOriginMask",
     "originalComparableText",
     "fontScaleX",
+    "originalFontScaleX",
+    "originalCharSpacing",
+    "editCharSpacing",
+    "originalAscent",
+    "originalInkOffsetX",
+    "originalInkOffsetY",
+    "typographyCalibrated",
   ];
 
   const state = {
@@ -223,9 +264,13 @@
     isPreparingTextBoxes: false,
     isRunningOcr: false,
     splitRanges: [],
+    beforePreview: false,
+    vectorTextExport: true,
+    letterSpacing: 0,
     uiLanguage: initialLanguage,
     lastStatusRaw: "",
     lastStatusIsError: false,
+    exactExportAvailable: null,
   };
 
   const ui = {
@@ -260,6 +305,7 @@
     undoBtn: document.getElementById("undoBtn"),
     redoBtn: document.getElementById("redoBtn"),
     clearPageBtn: document.getElementById("clearPageBtn"),
+    beforeAfterBtn: document.getElementById("beforeAfterBtn"),
     deleteSelectionBtn: document.getElementById("deleteSelectionBtn"),
     duplicateSelectionBtn: document.getElementById("duplicateSelectionBtn"),
     bringFrontBtn: document.getElementById("bringFrontBtn"),
@@ -281,6 +327,21 @@
     zoomControlLabel: document.getElementById("zoomControlLabel"),
     propertiesHeading: document.getElementById("propertiesHeading"),
     svgPageBtn: document.getElementById("svgPageBtn"),
+    splitSectionBtn: document.getElementById("splitSectionBtn"),
+    splitPanelSection: document.getElementById("splitPanelSection"),
+    textTuneHeading: document.getElementById("textTuneHeading"),
+    labelLetterSpacing: document.getElementById("labelLetterSpacing"),
+    letterSpacingInput: document.getElementById("letterSpacingInput"),
+    letterSpacingValue: document.getElementById("letterSpacingValue"),
+    autoMatchTextBtn: document.getElementById("autoMatchTextBtn"),
+    vectorTextExportInput: document.getElementById("vectorTextExportInput"),
+    vectorTextExportLabel: document.getElementById("vectorTextExportLabel"),
+    fontInspectorHeading: document.getElementById("fontInspectorHeading"),
+    fontInspectorOriginalLabel: document.getElementById("fontInspectorOriginalLabel"),
+    fontInspectorOriginalValue: document.getElementById("fontInspectorOriginalValue"),
+    fontInspectorExportLabel: document.getElementById("fontInspectorExportLabel"),
+    fontInspectorExportValue: document.getElementById("fontInspectorExportValue"),
+    fontInspectorNote: document.getElementById("fontInspectorNote"),
     labelStroke: document.getElementById("labelStroke"),
     labelFill: document.getElementById("labelFill"),
     labelFillOpacity: document.getElementById("labelFillOpacity"),
@@ -362,6 +423,9 @@
       "Preparing export...": "내보내기 준비 중...",
       "Export complete.": "내보내기가 완료되었습니다.",
       "Failed to export PDF.": "PDF 내보내기에 실패했습니다.",
+      "No editable text selected.": "선택된 편집 텍스트가 없습니다.",
+      "Preview: Before": "미리보기: 편집 전",
+      "Preview: After": "미리보기: 편집 후",
       "Please choose a PDF file.": "PDF 파일을 선택해주세요.",
       "Reading PDF...": "PDF를 읽는 중...",
       "Could not open this PDF.": "이 PDF를 열 수 없습니다.",
@@ -429,6 +493,10 @@
     match = raw.match(/^Moved (\d+) text boxes?\.$/);
     if (match) {
       return `텍스트 박스 ${match[1]}개 이동됨.`;
+    }
+    match = raw.match(/^Auto-matched (\d+) text boxes?\.$/);
+    if (match) {
+      return `텍스트 박스 ${match[1]}개 자동 보정 완료.`;
     }
     return raw;
   }
@@ -622,8 +690,8 @@
     if (!useEditedScale) {
       return baseScale;
     }
-    // Avoid stretch artifacts on edited text; keep natural glyph quality.
-    return 1;
+    // Keep original horizontal glyph metric for seamless text replacement.
+    return baseScale;
   }
 
   function getEditableGroupBaseDimension(group, mask, axis) {
@@ -670,6 +738,7 @@
     );
     const fontWeight = group.editFontWeight || group.originalFontWeight || "400";
     const fontStyle = group.editFontStyle || group.originalFontStyle || "normal";
+    const inkOffsetX = Number(group.originalInkOffsetX || 0);
     const textScaleX = getEffectiveTextScaleX(
       group,
       Boolean(group && (group.hasTextEdit || group.editingActive)),
@@ -690,22 +759,12 @@
     const measuredWidth =
       measureSingleLineTextWidth(textValue, fontFamily, fontSize, fontWeight, fontStyle) *
       textScaleX;
-    const desiredWidth = Math.max(baseWidth, measuredWidth + padX * 2 + 4);
+    const desiredWidth = Math.max(baseWidth, measuredWidth + padX * 2 + 4 + Math.max(inkOffsetX, 0));
     const desiredHeight = Math.max(baseHeight, fontSize * 1.2 + padY * 2);
     const canvasWidth =
       group && group.canvas && typeof group.canvas.getWidth === "function"
         ? Number(group.canvas.getWidth() || 0)
         : 0;
-    if (canvasWidth > 1) {
-      const maxCanvasWidth = Math.max(canvasWidth - 2, 6);
-      const currentLeft = Number(group.left || 0);
-      const overflowToRight = currentLeft + desiredWidth - maxCanvasWidth;
-      if (overflowToRight > 0.5) {
-        group.set({
-          left: Math.max(currentLeft - overflowToRight, 0),
-        });
-      }
-    }
     const maxWidthByCanvas =
       canvasWidth > 1 ? Math.max(canvasWidth - Number(group.left || 0) - 2, 6) : desiredWidth;
 
@@ -928,6 +987,13 @@
     const effectiveFontStyle = edited
       ? group.editFontStyle || group.originalFontStyle || "normal"
       : group.originalFontStyle || "normal";
+    const effectiveCharSpacing = edited
+      ? Number(
+          typeof group.editCharSpacing === "number"
+            ? group.editCharSpacing
+            : group.originalCharSpacing || 0,
+        )
+      : Number(group.originalCharSpacing || 0);
     if (edited && !deleted && !hasLivePreview) {
       resizeEditableGroupMaskToText(group, effectiveText);
     } else if (!edited || deleted) {
@@ -939,11 +1005,13 @@
     const textWidth = Math.max(maskWidth - padX * 2, 4);
     const textScaleX = getEffectiveTextScaleX(group, edited || hasLivePreview);
     const renderFontSize = Math.max(effectiveFontSize, 8);
+    const inkOffsetX = Number(group.originalInkOffsetX || 0);
+    const inkOffsetY = Number(group.originalInkOffsetY || 0);
 
     text.set({
       text: deleted ? "" : effectiveText,
-      left: maskLeft + padX,
-      top: maskTop + padY,
+      left: maskLeft + padX + inkOffsetX,
+      top: maskTop + padY + inkOffsetY,
       originX: "left",
       originY: "top",
       textAlign: "left",
@@ -953,6 +1021,7 @@
       fontSize: renderFontSize,
       fontWeight: effectiveFontWeight,
       fontStyle: effectiveFontStyle,
+      charSpacing: effectiveCharSpacing,
       lineHeight: 1,
       splitByGrapheme: false,
       fill: group.textFillColor || state.textColor,
@@ -976,31 +1045,30 @@
     }
     const { mask } = nodes;
     const padX = Number(group.paddingX ?? 2);
-    const edited = Boolean(group.hasTextEdit);
-    const sampleText = edited ? group.editedText || group.originalText || "" : group.originalText || "";
+    const sampleText = group.originalText || group.editedText || "";
     if (!sampleText.trim()) {
       return;
     }
-    const fontFamily = edited
-      ? group.editFontFamily || group.originalFontFamily || state.fontFamily
-      : group.originalFontFamily || state.fontFamily;
-    const fontSize = edited
-      ? Number(group.editFontSize || group.originalFontSize || state.fontSize)
-      : Number(group.originalFontSize || state.fontSize);
-    const fontWeight = edited
-      ? group.editFontWeight || group.originalFontWeight || "400"
-      : group.originalFontWeight || "400";
-    const fontStyle = edited
-      ? group.editFontStyle || group.originalFontStyle || "normal"
-      : group.originalFontStyle || "normal";
+    const fontFamily = group.originalFontFamily || state.fontFamily;
+    const fontSize = Number(group.originalFontSize || state.fontSize);
+    const fontWeight = group.originalFontWeight || "400";
+    const fontStyle = group.originalFontStyle || "normal";
     const targetWidth = Math.max(getScaledObjectDimension(mask, "width") - padX * 2, 4);
-    group.fontScaleX = deriveFontScaleX(
+    const derivedScale = deriveFontScaleX(
       sampleText,
       fontFamily,
       fontSize,
       fontWeight,
       fontStyle,
       targetWidth,
+    );
+    if (!Number.isFinite(Number(group.originalFontScaleX))) {
+      group.originalFontScaleX = derivedScale;
+    }
+    group.fontScaleX = clamp(
+      Number(group.originalFontScaleX || derivedScale || 1),
+      0.5,
+      2.2,
     );
   }
 
@@ -1168,6 +1236,7 @@
     state.isPreparingTextBoxes = false;
     state.isRunningOcr = false;
     state.splitRanges = [];
+    state.beforePreview = false;
     state.pageZoom = 1;
 
     ui.pageStage.innerHTML = "";
@@ -1175,6 +1244,12 @@
     ui.pageCountLabel.textContent = t("no_file_loaded");
     ui.pagePositionLabel.textContent = t("page_zero");
     ui.dropHint.classList.remove("hidden");
+    if (ui.beforeAfterBtn) {
+      ui.beforeAfterBtn.textContent = t("preview_before");
+    }
+    if (ui.vectorTextExportInput) {
+      ui.vectorTextExportInput.checked = Boolean(state.vectorTextExport);
+    }
 
     updateActionButtons();
     updatePageButtons();
@@ -1182,6 +1257,8 @@
     syncSplitInputBounds();
     renderSplitRanges();
     updateZoomControls();
+    setLetterSpacingUiValue(0);
+    updateFontInspector();
   }
 
   function updateActionButtons() {
@@ -1189,6 +1266,15 @@
     ui.exportBtn.disabled = !hasPages;
     ui.ocrBtn.disabled = !hasPages || state.isRunningOcr;
     ui.clearPageBtn.disabled = !hasPages;
+    if (ui.beforeAfterBtn) {
+      ui.beforeAfterBtn.disabled = !hasPages;
+    }
+    if (ui.vectorTextExportInput) {
+      ui.vectorTextExportInput.disabled = !hasPages;
+    }
+    if (ui.autoMatchTextBtn) {
+      ui.autoMatchTextBtn.disabled = !hasPages;
+    }
     if (ui.addSplitRangeBtn) {
       ui.addSplitRangeBtn.disabled = !hasPages;
     }
@@ -1321,6 +1407,344 @@
     setStatus("Split ranges cleared.");
   }
 
+  function focusSplitPanelSection() {
+    if (!ui.splitPanelSection) {
+      return;
+    }
+    ui.splitPanelSection.scrollIntoView({
+      block: "nearest",
+      behavior: "smooth",
+    });
+    ui.splitPanelSection.classList.remove("flash-highlight");
+    void ui.splitPanelSection.offsetWidth;
+    ui.splitPanelSection.classList.add("flash-highlight");
+  }
+
+  function getActiveSelectionObjects(entry) {
+    if (!entry || !entry.fabric) {
+      return [];
+    }
+    const active = entry.fabric.getActiveObject();
+    if (!active) {
+      return [];
+    }
+    if (active.type === "activeSelection" && typeof active.getObjects === "function") {
+      return active.getObjects().slice();
+    }
+    return [active];
+  }
+
+  function getSelectedEditableGroups(entry) {
+    return getActiveSelectionObjects(entry).filter((object) => isEditableTextGroup(object));
+  }
+
+  function formatLetterSpacingValue(value) {
+    const numeric = Number(value || 0);
+    if (!Number.isFinite(numeric)) {
+      return "0";
+    }
+    return `${Math.round(numeric)}`;
+  }
+
+  function setLetterSpacingUiValue(nextValue) {
+    const numeric = clamp(Number(nextValue || 0), -120, 320);
+    state.letterSpacing = numeric;
+    if (ui.letterSpacingInput) {
+      ui.letterSpacingInput.value = String(Math.round(numeric));
+    }
+    if (ui.letterSpacingValue) {
+      ui.letterSpacingValue.textContent = formatLetterSpacingValue(numeric);
+    }
+  }
+
+  function updateFontInspector() {
+    if (
+      !ui.fontInspectorOriginalValue ||
+      !ui.fontInspectorExportValue ||
+      !ui.fontInspectorNote
+    ) {
+      return;
+    }
+    const entry = getCurrentEntry();
+    const selected = getSelectedEditableGroups(entry);
+    const target = selected.length ? selected[0] : null;
+    if (!target) {
+      ui.fontInspectorOriginalValue.textContent = "-";
+      ui.fontInspectorExportValue.textContent = "-";
+      ui.fontInspectorNote.textContent = t("font_inspector_unavailable");
+      return;
+    }
+    const originalFamily = String(target.originalFontFamily || "Unknown");
+    const originalWeight = String(target.originalFontWeight || "400");
+    const originalStyle = String(target.originalFontStyle || "normal");
+    const originalSize = Number(target.originalFontSize || 0);
+    const exportFamily = target.hasTextEdit
+      ? target.editFontFamily || originalFamily
+      : originalFamily;
+    const exportWeight = target.hasTextEdit
+      ? target.editFontWeight || originalWeight
+      : originalWeight;
+    const exportStyle = target.hasTextEdit
+      ? target.editFontStyle || originalStyle
+      : originalStyle;
+    const primaryFamily = getPrimaryFontFamilyCandidate(exportFamily);
+    const hasCustomEmbedCandidate = Boolean(
+      pdfLibFontkit && primaryFamily && findFontFaceSourceUrl(primaryFamily),
+    );
+    const descriptor = hasCustomEmbedCandidate
+      ? {
+          label: primaryFamily,
+          fallbackUsed: false,
+          customEmbedded: true,
+        }
+      : resolveStandardFontDescriptor(exportFamily, exportWeight, exportStyle);
+
+    ui.fontInspectorOriginalValue.textContent = `${originalFamily} ${Math.round(
+      Math.max(originalSize, 0),
+    )}px`;
+    ui.fontInspectorExportValue.textContent = descriptor.label;
+    ui.fontInspectorNote.textContent = descriptor.fallbackUsed
+      ? t("font_inspector_fallback", { font: descriptor.label })
+      : t("font_inspector_embedded", { font: descriptor.label });
+  }
+
+  function syncPropertyPanelFromSelection() {
+    const entry = getCurrentEntry();
+    const selected = getSelectedEditableGroups(entry);
+    if (!selected.length) {
+      setLetterSpacingUiValue(0);
+      updateFontInspector();
+      return;
+    }
+    const first = selected[0];
+    const spacing = first.hasTextEdit
+      ? Number(
+          typeof first.editCharSpacing === "number"
+            ? first.editCharSpacing
+            : first.originalCharSpacing || 0,
+        )
+      : Number(first.originalCharSpacing || 0);
+    setLetterSpacingUiValue(spacing);
+    updateFontInspector();
+  }
+
+  function applyLetterSpacingToSelection(rawValue) {
+    const entry = getCurrentEntry();
+    if (!entry || !entry.fabric) {
+      return;
+    }
+    const selected = getSelectedEditableGroups(entry);
+    const nextSpacing = clamp(Number(rawValue || 0), -120, 320);
+    setLetterSpacingUiValue(nextSpacing);
+    if (!selected.length) {
+      return;
+    }
+
+    selected.forEach((group) => {
+      group.editCharSpacing = nextSpacing;
+      if (!group.editFontFamily) {
+        group.editFontFamily = group.originalFontFamily || state.fontFamily;
+      }
+      if (!group.editFontSize) {
+        group.editFontSize = group.originalFontSize || state.fontSize;
+      }
+      if (!group.editFontWeight) {
+        group.editFontWeight = group.originalFontWeight || "400";
+      }
+      if (!group.editFontStyle) {
+        group.editFontStyle = group.originalFontStyle || "normal";
+      }
+      if (!group.editedText && !group.isDeletedText) {
+        group.editedText = group.originalText || "";
+      }
+      refreshEditableGroupChangedState(group);
+      if (group.hasTextEdit && !group.isDeletedText) {
+        resizeEditableGroupMaskToText(group, group.editedText || group.originalText || "");
+      } else {
+        restoreEditableGroupBaseSize(group);
+      }
+      syncEditableTextGeometry(group);
+      applyEditableVisualState(group, state.tool === "editText");
+      group.setCoords();
+    });
+    refreshEditableVisualsForEntry(entry);
+    entry.fabric.requestRenderAll();
+    saveHistory(entry);
+    updateFontInspector();
+  }
+
+  function getGroupTopLeft(group) {
+    const point = getObjectTopLeftOnCanvas(group);
+    return {
+      left: Number(point.x || group.left || 0),
+      top: Number(point.y || group.top || 0),
+    };
+  }
+
+  function snapSelectionToBaseline() {
+    const entry = getCurrentEntry();
+    if (!entry || !entry.fabric || state.tool !== "editText") {
+      return;
+    }
+    const selected = getSelectedEditableGroups(entry);
+    if (!selected.length) {
+      setStatus("No editable text selected.", true);
+      return;
+    }
+
+    const refs = entry.fabric
+      .getObjects()
+      .filter((object) => isEditableTextGroup(object) && !object.isDeletedText);
+    if (!refs.length) {
+      setStatus("No editable text selected.", true);
+      return;
+    }
+
+    let movedCount = 0;
+    selected.forEach((target) => {
+      const targetPos = getGroupTopLeft(target);
+      const targetFontSize = Number(
+        target.hasTextEdit ? target.editFontSize || target.originalFontSize : target.originalFontSize,
+      );
+      const targetAscent = clamp(Number(target.originalAscent || 0.82), 0.5, 0.95);
+      const targetBaseline = targetPos.top + targetFontSize * targetAscent;
+
+      let best = null;
+      refs.forEach((ref) => {
+        if (ref === target) {
+          return;
+        }
+        const refPos = getGroupTopLeft(ref);
+        const refFontSize = Number(
+          ref.hasTextEdit ? ref.editFontSize || ref.originalFontSize : ref.originalFontSize,
+        );
+        const refAscent = clamp(Number(ref.originalAscent || 0.82), 0.5, 0.95);
+        const refBaseline = refPos.top + refFontSize * refAscent;
+        const score = Math.abs(refBaseline - targetBaseline) + Math.abs(refPos.top - targetPos.top) * 0.1;
+        if (!best || score < best.score) {
+          best = { baseline: refBaseline, score };
+        }
+      });
+
+      const baseline = best
+        ? best.baseline
+        : Number(target.baseTop || targetPos.top) + targetFontSize * targetAscent;
+      const nextTop = baseline - targetFontSize * targetAscent;
+      if (Math.abs(nextTop - Number(target.top || 0)) > 0.3) {
+        target.set({ top: nextTop });
+        target.setCoords();
+        movedCount += 1;
+      }
+    });
+
+    if (!movedCount) {
+      setStatus("Nothing selected.", true);
+      return;
+    }
+    refreshEditableVisualsForEntry(entry);
+    entry.fabric.requestRenderAll();
+    saveHistory(entry);
+    setStatus(`Moved ${movedCount} text boxes.`);
+  }
+
+  function autoMatchAllEditableText() {
+    if (!state.pageEntries.length) {
+      setStatus("Open a PDF first.", true);
+      return;
+    }
+    let touched = 0;
+    state.pageEntries.forEach((entry) => {
+      const groups = entry.fabric.getObjects().filter((object) => isEditableTextGroup(object));
+      if (!groups.length) {
+        return;
+      }
+      let entryTouched = 0;
+      groups.forEach((group) => {
+        group.editFontFamily = group.originalFontFamily;
+        group.editFontSize = group.originalFontSize;
+        group.editFontWeight = group.originalFontWeight;
+        group.editFontStyle = group.originalFontStyle;
+        group.editCharSpacing = Number(group.originalCharSpacing || 0);
+        group.fontScaleX = clamp(
+          Number(group.originalFontScaleX || group.fontScaleX || 1),
+          0.5,
+          2.2,
+        );
+        refreshEditableGroupChangedState(group);
+        if (group.hasTextEdit && !group.isDeletedText) {
+          resizeEditableGroupMaskToText(group, group.editedText || group.originalText || "");
+        } else {
+          restoreEditableGroupBaseSize(group);
+        }
+        syncEditableTextGeometry(group);
+        applyEditableVisualState(group, state.tool === "editText");
+        touched += 1;
+        entryTouched += 1;
+      });
+      if (entryTouched) {
+        saveHistory(entry);
+      }
+      entry.fabric.requestRenderAll();
+    });
+    if (!touched) {
+      setStatus("No embedded text found. Use OCR for scanned PDFs.", true);
+      return;
+    }
+    syncPropertyPanelFromSelection();
+    setStatus(`Auto-matched ${touched} text boxes.`);
+  }
+
+  function applyBeforePreviewToEntry(entry) {
+    if (!entry || !entry.fabric) {
+      return;
+    }
+    if (!state.beforePreview) {
+      entry.fabric.getObjects().forEach((object) => {
+        if (Object.prototype.hasOwnProperty.call(object, "__beforeVisibleCache")) {
+          object.visible = Boolean(object.__beforeVisibleCache);
+          delete object.__beforeVisibleCache;
+        }
+      });
+      applyToolMode(entry.fabric);
+      refreshEditableVisualsForEntry(entry);
+      entry.fabric.requestRenderAll();
+      return;
+    }
+    entry.fabric.getObjects().forEach((object) => {
+      if (!Object.prototype.hasOwnProperty.call(object, "__beforeVisibleCache")) {
+        object.__beforeVisibleCache = Boolean(object.visible);
+      }
+      if (!object.isHelper) {
+        object.visible = false;
+      }
+    });
+    entry.fabric.requestRenderAll();
+  }
+
+  function setBeforePreview(enabled) {
+    const shouldEnable = Boolean(enabled);
+    if (state.beforePreview === shouldEnable) {
+      return;
+    }
+    if (shouldEnable) {
+      closeAllInlineEditors(true);
+    }
+    state.beforePreview = shouldEnable;
+    state.pageEntries.forEach((entry) => {
+      applyBeforePreviewToEntry(entry);
+    });
+    if (ui.beforeAfterBtn) {
+      ui.beforeAfterBtn.textContent = state.beforePreview
+        ? t("preview_after")
+        : t("preview_before");
+    }
+    if (state.beforePreview) {
+      setStatus("Preview: Before");
+    } else {
+      setStatus("Preview: After");
+    }
+  }
+
   async function determineAutoRenderScale(pdfDocument) {
     if (!pdfDocument || typeof pdfDocument.getPage !== "function") {
       return state.renderScale;
@@ -1448,6 +1872,9 @@
     if (ui.clearPageBtn) {
       ui.clearPageBtn.textContent = t("clear_page");
     }
+    if (ui.beforeAfterBtn) {
+      ui.beforeAfterBtn.textContent = state.beforePreview ? t("preview_after") : t("preview_before");
+    }
     if (ui.zoomControlLabel) {
       ui.zoomControlLabel.textContent = t("zoom");
     }
@@ -1462,6 +1889,9 @@
     }
     if (ui.svgPageBtn) {
       ui.svgPageBtn.textContent = t("svg_page");
+    }
+    if (ui.splitSectionBtn) {
+      ui.splitSectionBtn.textContent = t("split_page");
     }
     if (ui.labelStroke) {
       ui.labelStroke.textContent = t("stroke");
@@ -1489,6 +1919,30 @@
     }
     if (ui.sendBackBtn) {
       ui.sendBackBtn.textContent = t("send_back");
+    }
+    if (ui.textTuneHeading) {
+      ui.textTuneHeading.textContent = t("text_tune_heading");
+    }
+    if (ui.labelLetterSpacing) {
+      ui.labelLetterSpacing.textContent = t("letter_spacing");
+    }
+    if (ui.autoMatchTextBtn) {
+      ui.autoMatchTextBtn.textContent = t("auto_match_all");
+    }
+    if (ui.vectorTextExportLabel) {
+      ui.vectorTextExportLabel.textContent = t("vector_text_export");
+    }
+    if (ui.fontInspectorHeading) {
+      ui.fontInspectorHeading.textContent = t("font_inspector_heading");
+    }
+    if (ui.fontInspectorOriginalLabel) {
+      ui.fontInspectorOriginalLabel.textContent = t("font_inspector_original");
+    }
+    if (ui.fontInspectorExportLabel) {
+      ui.fontInspectorExportLabel.textContent = t("font_inspector_export");
+    }
+    if (ui.fontInspectorNote) {
+      ui.fontInspectorNote.textContent = t("font_inspector_empty");
     }
     if (ui.splitHeading) {
       ui.splitHeading.textContent = t("split_heading");
@@ -1527,6 +1981,7 @@
     updatePagePositionLabel();
     updateThumbnailLabels();
     renderSplitRanges();
+    syncPropertyPanelFromSelection();
     if (state.lastStatusRaw) {
       setStatus(state.lastStatusRaw, state.lastStatusIsError);
     } else {
@@ -1643,6 +2098,9 @@
       applyDrawingOptions(entry.fabric);
       applyToolMode(entry.fabric);
       refreshEditableVisualsForEntry(entry);
+      if (state.beforePreview) {
+        applyBeforePreviewToEntry(entry);
+      }
       entry.fabric.requestRenderAll();
     });
   }
@@ -1683,6 +2141,7 @@
       entry.fabric.renderAll();
       if (entry.index === state.currentPageIndex) {
         updateUndoRedoButtons();
+        syncPropertyPanelFromSelection();
       }
     });
   }
@@ -1869,6 +2328,372 @@
     return "'Helvetica Neue', Arial, sans-serif";
   }
 
+  function splitFontFamilyCandidates(fontFamilyValue) {
+    const raw = String(fontFamilyValue || "");
+    if (!raw.trim()) {
+      return [];
+    }
+    const candidates = [];
+    let chunk = "";
+    let quote = "";
+    for (let index = 0; index < raw.length; index += 1) {
+      const char = raw[index];
+      if ((char === "'" || char === '"') && (!quote || quote === char)) {
+        if (quote === char) {
+          quote = "";
+        } else {
+          quote = char;
+        }
+        chunk += char;
+        continue;
+      }
+      if (char === "," && !quote) {
+        if (chunk.trim()) {
+          candidates.push(chunk.trim());
+        }
+        chunk = "";
+        continue;
+      }
+      chunk += char;
+    }
+    if (chunk.trim()) {
+      candidates.push(chunk.trim());
+    }
+    return candidates
+      .map((value) => normalizeRawFontCandidate(value))
+      .filter((value) => Boolean(value));
+  }
+
+  function normalizeFontLookupToken(value) {
+    return String(value || "")
+      .replace(/^['"]|['"]$/g, "")
+      .trim()
+      .toLowerCase();
+  }
+
+  function getPrimaryFontFamilyCandidate(fontFamilyValue) {
+    const candidates = splitFontFamilyCandidates(fontFamilyValue);
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      if (!candidate || isGenericFontFamily(candidate)) {
+        continue;
+      }
+      return candidate;
+    }
+    return "";
+  }
+
+  function extractEmbeddableFontUrl(srcValue) {
+    const src = String(srcValue || "");
+    if (!src) {
+      return "";
+    }
+    const urlRegex = /url\(([^)]+)\)/gi;
+    let match = urlRegex.exec(src);
+    while (match) {
+      const cleaned = String(match[1] || "")
+        .trim()
+        .replace(/^['"]|['"]$/g, "");
+      if (
+        cleaned.startsWith("data:") ||
+        cleaned.startsWith("blob:") ||
+        cleaned.startsWith("http://") ||
+        cleaned.startsWith("https://")
+      ) {
+        return cleaned;
+      }
+      match = urlRegex.exec(src);
+    }
+    return "";
+  }
+
+  function findFontFaceSourceUrl(familyName) {
+    const lookup = normalizeFontLookupToken(familyName);
+    if (!lookup) {
+      return "";
+    }
+    if (cssFontFaceSrcCache.has(lookup)) {
+      return cssFontFaceSrcCache.get(lookup) || "";
+    }
+
+    const fontFaceRuleType = typeof CSSRule !== "undefined" ? CSSRule.FONT_FACE_RULE : 5;
+    const styleSheets = Array.from(document.styleSheets || []);
+    for (let index = 0; index < styleSheets.length; index += 1) {
+      const sheet = styleSheets[index];
+      let rules = null;
+      try {
+        rules = sheet.cssRules;
+      } catch (error) {
+        rules = null;
+      }
+      if (!rules || !rules.length) {
+        continue;
+      }
+      for (let ruleIndex = 0; ruleIndex < rules.length; ruleIndex += 1) {
+        const rule = rules[ruleIndex];
+        if (!rule || rule.type !== fontFaceRuleType || !rule.style) {
+          continue;
+        }
+        const family = normalizeFontLookupToken(rule.style.getPropertyValue("font-family"));
+        if (!family || family !== lookup) {
+          continue;
+        }
+        const src = extractEmbeddableFontUrl(rule.style.getPropertyValue("src"));
+        cssFontFaceSrcCache.set(lookup, src || "");
+        return src || "";
+      }
+    }
+    cssFontFaceSrcCache.set(lookup, "");
+    return "";
+  }
+
+  async function loadFontFaceBytes(familyName) {
+    const lookup = normalizeFontLookupToken(familyName);
+    if (!lookup) {
+      return null;
+    }
+    if (cssFontFaceBytesCache.has(lookup)) {
+      return cssFontFaceBytesCache.get(lookup);
+    }
+
+    const loader = (async () => {
+      const sourceUrl = findFontFaceSourceUrl(lookup);
+      if (!sourceUrl) {
+        return null;
+      }
+      try {
+        const response = await fetch(sourceUrl);
+        if (!response.ok) {
+          return null;
+        }
+        const bytes = await response.arrayBuffer();
+        return new Uint8Array(bytes);
+      } catch (error) {
+        return null;
+      }
+    })();
+
+    cssFontFaceBytesCache.set(lookup, loader);
+    return loader;
+  }
+
+  function ensurePdfFontkitRegistered(pdfDoc, fontCache) {
+    if (!pdfDoc || !fontCache || !pdfLibFontkit || typeof pdfDoc.registerFontkit !== "function") {
+      return false;
+    }
+    if (fontCache.__fontkitRegistered) {
+      return true;
+    }
+    try {
+      pdfDoc.registerFontkit(pdfLibFontkit);
+      fontCache.__fontkitRegistered = true;
+      return true;
+    } catch (error) {
+      fontCache.__fontkitRegistered = false;
+      return false;
+    }
+  }
+
+  async function getEmbeddedFontForOperation(pdfDoc, fontCache, operation) {
+    const family = getPrimaryFontFamilyCandidate(operation && operation.fontFamily);
+    const canEmbedCustom = ensurePdfFontkitRegistered(pdfDoc, fontCache);
+    if (family && canEmbedCustom) {
+      const customCacheKey = `custom:${normalizeFontLookupToken(family)}`;
+      if (!Object.prototype.hasOwnProperty.call(fontCache, customCacheKey)) {
+        let embedded = null;
+        const fontBytes = await loadFontFaceBytes(family);
+        if (fontBytes && fontBytes.length) {
+          try {
+            embedded = await pdfDoc.embedFont(fontBytes, { subset: true });
+          } catch (error) {
+            embedded = null;
+          }
+        }
+        fontCache[customCacheKey] = embedded;
+      }
+      if (fontCache[customCacheKey]) {
+        return {
+          font: fontCache[customCacheKey],
+          descriptor: {
+            label: family,
+            fallbackUsed: false,
+            customEmbedded: true,
+          },
+        };
+      }
+    }
+
+    const descriptor = resolveStandardFontDescriptor(
+      operation && operation.fontFamily,
+      operation && operation.fontWeight,
+      operation && operation.fontStyle,
+    );
+    const font = await getEmbeddedStandardFont(pdfDoc, fontCache, descriptor);
+    return {
+      font,
+      descriptor,
+    };
+  }
+
+  function normalizeWeightValue(weightRaw) {
+    const weightText = String(weightRaw || "").toLowerCase().trim();
+    const parsed = Number.parseInt(weightText, 10);
+    if (Number.isFinite(parsed)) {
+      return clamp(parsed, 100, 900);
+    }
+    if (weightText.includes("bold")) {
+      return 700;
+    }
+    return 400;
+  }
+
+  function resolveStandardFontDescriptor(fontFamilyRaw, fontWeightRaw, fontStyleRaw) {
+    const familyRaw = String(fontFamilyRaw || "").toLowerCase();
+    const styleRaw = String(fontStyleRaw || "").toLowerCase();
+    const weight = normalizeWeightValue(fontWeightRaw);
+    const isBold = weight >= 600;
+    const isItalic = styleRaw.includes("italic") || styleRaw.includes("oblique");
+
+    let familyKey = "helvetica";
+    let recognized = false;
+
+    if (
+      familyRaw.includes("times") ||
+      familyRaw.includes("georgia") ||
+      familyRaw.includes("cambria") ||
+      familyRaw.includes("garamond") ||
+      familyRaw.includes("serif")
+    ) {
+      familyKey = "times";
+      recognized = true;
+    } else if (
+      familyRaw.includes("courier") ||
+      familyRaw.includes("consolas") ||
+      familyRaw.includes("mono") ||
+      familyRaw.includes("vt323")
+    ) {
+      familyKey = "courier";
+      recognized = true;
+    } else if (
+      familyRaw.includes("arial") ||
+      familyRaw.includes("helvetica") ||
+      familyRaw.includes("calibri") ||
+      familyRaw.includes("tahoma") ||
+      familyRaw.includes("verdana") ||
+      familyRaw.includes("trebuchet") ||
+      familyRaw.includes("gaegu") ||
+      familyRaw.includes("permanent marker") ||
+      familyRaw.includes("caveat") ||
+      familyRaw.includes("ibm plex sans")
+    ) {
+      familyKey = "helvetica";
+      recognized = true;
+    }
+
+    let fontName = "Helvetica";
+    let label = "Helvetica";
+    if (familyKey === "times") {
+      if (isBold && isItalic) {
+        fontName = "TimesBoldItalic";
+        label = "Times Bold Italic";
+      } else if (isBold) {
+        fontName = "TimesBold";
+        label = "Times Bold";
+      } else if (isItalic) {
+        fontName = "TimesItalic";
+        label = "Times Italic";
+      } else {
+        fontName = "TimesRoman";
+        label = "Times Roman";
+      }
+    } else if (familyKey === "courier") {
+      if (isBold && isItalic) {
+        fontName = "CourierBoldOblique";
+        label = "Courier Bold Oblique";
+      } else if (isBold) {
+        fontName = "CourierBold";
+        label = "Courier Bold";
+      } else if (isItalic) {
+        fontName = "CourierOblique";
+        label = "Courier Oblique";
+      } else {
+        fontName = "Courier";
+        label = "Courier";
+      }
+    } else {
+      if (isBold && isItalic) {
+        fontName = "HelveticaBoldOblique";
+        label = "Helvetica Bold Oblique";
+      } else if (isBold) {
+        fontName = "HelveticaBold";
+        label = "Helvetica Bold";
+      } else if (isItalic) {
+        fontName = "HelveticaOblique";
+        label = "Helvetica Oblique";
+      } else {
+        fontName = "Helvetica";
+        label = "Helvetica";
+      }
+    }
+
+    return {
+      fontName,
+      label,
+      fallbackUsed: !recognized,
+    };
+  }
+
+  async function getEmbeddedStandardFont(pdfDoc, fontCache, descriptor) {
+    const safeDescriptor = descriptor || { fontName: "Helvetica" };
+    const fontName = String(safeDescriptor.fontName || "Helvetica");
+    if (!fontCache[fontName]) {
+      const standardFontName =
+        (pdfLib.StandardFonts && pdfLib.StandardFonts[fontName]) || pdfLib.StandardFonts.Helvetica;
+      fontCache[fontName] = await pdfDoc.embedFont(standardFontName);
+    }
+    return fontCache[fontName];
+  }
+
+  function parseColorForPdf(colorRaw) {
+    const color = String(colorRaw || "").trim().toLowerCase();
+    if (!color) {
+      return pdfLib.rgb(0, 0, 0);
+    }
+    if (color.startsWith("#")) {
+      const hex = color.slice(1);
+      const fullHex =
+        hex.length === 3
+          ? hex
+              .split("")
+              .map((char) => char + char)
+              .join("")
+          : hex;
+      const parsed = Number.parseInt(fullHex, 16);
+      if (Number.isFinite(parsed)) {
+        return pdfLib.rgb(
+          ((parsed >> 16) & 255) / 255,
+          ((parsed >> 8) & 255) / 255,
+          (parsed & 255) / 255,
+        );
+      }
+    }
+    const rgbMatch = color.match(/rgba?\(([^)]+)\)/);
+    if (rgbMatch) {
+      const channels = rgbMatch[1]
+        .split(",")
+        .map((value) => Number.parseFloat(value.trim()))
+        .filter((value) => Number.isFinite(value));
+      if (channels.length >= 3) {
+        return pdfLib.rgb(
+          clamp(channels[0], 0, 255) / 255,
+          clamp(channels[1], 0, 255) / 255,
+          clamp(channels[2], 0, 255) / 255,
+        );
+      }
+    }
+    return pdfLib.rgb(0, 0, 0);
+  }
+
   function derivePdfFontTraits(style, item) {
     const fontFamilyRaw = style && style.fontFamily ? style.fontFamily : "";
     const fontNameRaw = item && item.fontName ? item.fontName : "";
@@ -1905,12 +2730,22 @@
     const fontFamily = String(config.fontFamily || "Arial, sans-serif");
     const fontWeight = String(config.fontWeight || "400");
     const fontStyle = String(config.fontStyle || "normal");
+    const charSpacing = Number(config.charSpacing || 0);
+    const originalAscent = Number.isFinite(Number(config.originalAscent))
+      ? Number(config.originalAscent)
+      : 0.82;
     const source = String(config.source || "pdf");
     const maskFillColor = String(config.maskFillColor || "#ffffff");
     const textFillColor = String(config.textFillColor || state.textColor);
     const fontScaleX = Math.max(Number(config.fontScaleX || 1), 0.5);
     const padX = Math.max(Number(config.paddingX ?? 0), 0);
     const padY = Math.max(Number(config.paddingY ?? 0), 0);
+    const originalInkOffsetX = Number.isFinite(Number(config.originalInkOffsetX))
+      ? Number(config.originalInkOffsetX)
+      : 0;
+    const originalInkOffsetY = Number.isFinite(Number(config.originalInkOffsetY))
+      ? Number(config.originalInkOffsetY)
+      : 0;
 
     const mask = new fabricLib.Rect({
       left: 0,
@@ -1940,6 +2775,7 @@
       fontFamily,
       fontWeight,
       fontStyle,
+      charSpacing,
       fill: textFillColor,
       selectable: false,
       evented: false,
@@ -1978,10 +2814,12 @@
       originalFontSize: fontSize,
       originalFontWeight: fontWeight,
       originalFontStyle: fontStyle,
+      originalCharSpacing: charSpacing,
       editFontFamily: fontFamily,
       editFontSize: fontSize,
       editFontWeight: fontWeight,
       editFontStyle: fontStyle,
+      editCharSpacing: charSpacing,
       paddingX: padX,
       paddingY: padY,
       editingActive: false,
@@ -1992,10 +2830,74 @@
       baseWidth: width,
       baseHeight: height,
       fontScaleX,
+      originalFontScaleX: fontScaleX,
+      originalAscent: clamp(originalAscent, 0.5, 0.95),
+      originalInkOffsetX: clamp(originalInkOffsetX, -4, 4),
+      originalInkOffsetY: clamp(originalInkOffsetY, -3, 3),
+      typographyCalibrated: false,
     });
 
     applyEditableVisualState(group, state.tool === "editText");
     return group;
+  }
+
+  function getComparableFontToken(value) {
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+  }
+
+  function hasEditableGroupStyleChanges(group) {
+    if (!isEditableTextGroup(group)) {
+      return false;
+    }
+    const familyChanged =
+      getComparableFontToken(group.editFontFamily) !==
+      getComparableFontToken(group.originalFontFamily);
+    const sizeChanged =
+      Math.abs(
+        Number(group.editFontSize || group.originalFontSize || 0) -
+          Number(group.originalFontSize || 0),
+      ) > 0.05;
+    const weightChanged =
+      normalizeWeightValue(group.editFontWeight || group.originalFontWeight) !==
+      normalizeWeightValue(group.originalFontWeight);
+    const styleChanged =
+      getComparableFontToken(group.editFontStyle || group.originalFontStyle) !==
+      getComparableFontToken(group.originalFontStyle);
+    const charSpacingChanged =
+      Math.abs(
+        Number(group.editCharSpacing ?? group.originalCharSpacing ?? 0) -
+          Number(group.originalCharSpacing ?? 0),
+      ) > 0.01;
+    return familyChanged || sizeChanged || weightChanged || styleChanged || charSpacingChanged;
+  }
+
+  function refreshEditableGroupChangedState(group) {
+    if (!isEditableTextGroup(group)) {
+      return;
+    }
+    const editedComparable = normalizeEditorCommitText(group.editedText || "");
+    const originalComparable = getOriginalComparableText(group);
+    const textChanged = editedComparable !== originalComparable;
+    const styleChanged = hasEditableGroupStyleChanges(group);
+    const deleted = Boolean(group.isDeletedText);
+    const changed = deleted || textChanged || styleChanged;
+    group.hasTextEdit = changed;
+    if (changed && !deleted) {
+      if (!editedComparable) {
+        group.editedText = group.originalText || "";
+      }
+    } else if (!changed) {
+      group.editedText = "";
+      group.isDeletedText = false;
+      group.editFontFamily = group.originalFontFamily;
+      group.editFontSize = group.originalFontSize;
+      group.editFontWeight = group.originalFontWeight;
+      group.editFontStyle = group.originalFontStyle;
+      group.editCharSpacing = Number(group.originalCharSpacing || 0);
+    }
   }
 
   function updateEditableGroupText(group, nextValue) {
@@ -2011,6 +2913,11 @@
       group.isDeletedText = true;
       group.editedText = "";
       group.livePreviewText = null;
+      group.fontScaleX = clamp(
+        Number(group.originalFontScaleX || group.fontScaleX || 1),
+        0.5,
+        2.2,
+      );
       restoreEditableGroupBaseSize(group);
       syncEditableTextGeometry(group);
       applyEditableVisualState(group, state.tool === "editText");
@@ -2022,27 +2929,21 @@
     group.livePreviewText = null;
     group.hasTextEdit = normalized !== originalComparableText;
 
-    if (!group.hasTextEdit) {
-      group.editedText = "";
-      group.editFontFamily = group.originalFontFamily;
-      group.editFontSize = group.originalFontSize;
-      group.editFontWeight = group.originalFontWeight;
-      group.editFontStyle = group.originalFontStyle;
-      restoreEditableGroupBaseSize(group);
+    group.editFontFamily = group.originalFontFamily || state.fontFamily;
+    group.editFontSize = group.originalFontSize || state.fontSize;
+    group.editFontWeight = group.originalFontWeight || "400";
+    group.editFontStyle = group.originalFontStyle || "normal";
+    group.editCharSpacing = Number(group.originalCharSpacing || 0);
+    group.fontScaleX = clamp(
+      Number(group.originalFontScaleX || group.fontScaleX || 1),
+      0.5,
+      2.2,
+    );
+    refreshEditableGroupChangedState(group);
+    if (group.hasTextEdit && !group.isDeletedText) {
+      resizeEditableGroupMaskToText(group, group.editedText || normalized);
     } else {
-      if (!group.editFontFamily) {
-        group.editFontFamily = group.originalFontFamily || state.fontFamily;
-      }
-      if (!group.editFontSize) {
-        group.editFontSize = group.originalFontSize || state.fontSize;
-      }
-      if (!group.editFontWeight) {
-        group.editFontWeight = group.originalFontWeight || "400";
-      }
-      if (!group.editFontStyle) {
-        group.editFontStyle = group.originalFontStyle || "normal";
-      }
-      resizeEditableGroupMaskToText(group, normalized);
+      restoreEditableGroupBaseSize(group);
     }
 
     syncEditableTextGeometry(group);
@@ -2060,10 +2961,328 @@
     group.editFontSize = group.originalFontSize;
     group.editFontWeight = group.originalFontWeight;
     group.editFontStyle = group.originalFontStyle;
+    group.editCharSpacing = Number(group.originalCharSpacing || 0);
+    group.fontScaleX = clamp(
+      Number(group.originalFontScaleX || group.fontScaleX || 1),
+      0.5,
+      2.2,
+    );
     group.livePreviewText = null;
     restoreEditableGroupBaseSize(group);
     syncEditableTextGeometry(group);
     applyEditableVisualState(group, state.tool === "editText");
+  }
+
+  function getEditableGroupMaskRect(group) {
+    const nodes = getEditableGroupNodes(group);
+    if (!nodes) {
+      return null;
+    }
+    const { mask } = nodes;
+    const point = getObjectTopLeftOnCanvas(group);
+    const width = Math.max(Math.round(getScaledObjectDimension(mask, "width")), 2);
+    const height = Math.max(Math.round(getScaledObjectDimension(mask, "height")), 2);
+    return {
+      left: Math.round(Number(point.x || 0)),
+      top: Math.round(Number(point.y || 0)),
+      width,
+      height,
+    };
+  }
+
+  function buildBinaryMaskFromImageData(imageData, threshold) {
+    const width = Number(imageData.width || 0);
+    const height = Number(imageData.height || 0);
+    const data = imageData.data || new Uint8ClampedArray(0);
+    const mask = new Uint8Array(width * height);
+    for (let index = 0; index < width * height; index += 1) {
+      const offset = index * 4;
+      const alpha = Number(data[offset + 3] || 0) / 255;
+      const r = Number(data[offset] || 255);
+      const g = Number(data[offset + 1] || 255);
+      const b = Number(data[offset + 2] || 255);
+      const luminance = r * 0.2126 + g * 0.7152 + b * 0.0722;
+      const darkness = (255 - luminance) * alpha;
+      mask[index] = darkness > threshold ? 1 : 0;
+    }
+    return mask;
+  }
+
+  function scoreBinaryMasks(referenceMask, candidateMask) {
+    if (!referenceMask || !candidateMask || referenceMask.length !== candidateMask.length) {
+      return Number.POSITIVE_INFINITY;
+    }
+    let referenceCount = 0;
+    let candidateCount = 0;
+    let overlap = 0;
+    let union = 0;
+    for (let index = 0; index < referenceMask.length; index += 1) {
+      const ref = referenceMask[index] > 0;
+      const cand = candidateMask[index] > 0;
+      if (ref) {
+        referenceCount += 1;
+      }
+      if (cand) {
+        candidateCount += 1;
+      }
+      if (ref && cand) {
+        overlap += 1;
+      }
+      if (ref || cand) {
+        union += 1;
+      }
+    }
+    if (referenceCount < 8) {
+      return Number.POSITIVE_INFINITY;
+    }
+    const iouPenalty = 1 - overlap / Math.max(union, 1);
+    const densityPenalty = Math.abs(candidateCount - referenceCount) / Math.max(referenceCount, 1);
+    return iouPenalty + densityPenalty * 0.35;
+  }
+
+  function findBinaryMaskBounds(mask, width, height) {
+    if (!mask || !mask.length || width <= 0 || height <= 0) {
+      return null;
+    }
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        if (!mask[y * width + x]) {
+          continue;
+        }
+        if (x < minX) {
+          minX = x;
+        }
+        if (y < minY) {
+          minY = y;
+        }
+        if (x > maxX) {
+          maxX = x;
+        }
+        if (y > maxY) {
+          maxY = y;
+        }
+      }
+    }
+    if (maxX < minX || maxY < minY) {
+      return null;
+    }
+    return {
+      minX,
+      minY,
+      maxX,
+      maxY,
+      width: maxX - minX + 1,
+      height: maxY - minY + 1,
+    };
+  }
+
+  function renderCandidateTextMask(config) {
+    const width = Math.max(Math.round(Number(config.width || 0)), 2);
+    const height = Math.max(Math.round(Number(config.height || 0)), 2);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { alpha: true });
+    if (!context) {
+      return new Uint8Array(width * height);
+    }
+    context.clearRect(0, 0, width, height);
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    const textValue = String(config.text || "");
+    if (!textValue.trim()) {
+      const imageData = context.getImageData(0, 0, width, height);
+      return buildBinaryMaskFromImageData(imageData, 12);
+    }
+
+    const fontSize = Math.max(Number(config.fontSize || 8), 1);
+    const fontFamily = String(config.fontFamily || "Arial, sans-serif");
+    const fontWeight = String(config.fontWeight || "400");
+    const fontStyle = String(config.fontStyle || "normal");
+    const padX = Number(config.padX || 0);
+    const padY = Number(config.padY || 0);
+    const ascentRatio = clamp(Number(config.ascent || 0.82), 0.5, 0.95);
+    const fontScaleX = clamp(Number(config.fontScaleX || 1), 0.5, 2.2);
+    const charSpacing = Number(config.charSpacing || 0);
+    const offsetX = Number(config.offsetX || 0);
+    const offsetY = Number(config.offsetY || 0);
+    const trackingPx = (charSpacing / 1000) * fontSize;
+
+    context.fillStyle = "#000000";
+    context.textBaseline = "alphabetic";
+    context.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
+    const baselineY = clamp(padY + offsetY + fontSize * ascentRatio, 1, height - 1);
+
+    context.save();
+    context.scale(fontScaleX, 1);
+    let cursorX = (padX + offsetX) / fontScaleX;
+    for (let index = 0; index < textValue.length; index += 1) {
+      const glyph = textValue[index];
+      context.fillText(glyph, cursorX, baselineY);
+      const advance = context.measureText(glyph).width;
+      cursorX += advance + trackingPx;
+    }
+    context.restore();
+
+    const imageData = context.getImageData(0, 0, width, height);
+    return buildBinaryMaskFromImageData(imageData, 20);
+  }
+
+  function fineTuneEditableGroupTypography(entry, group) {
+    if (
+      !entry ||
+      !entry.backgroundCanvas ||
+      !isEditableTextGroup(group) ||
+      group.textSource !== "pdf" ||
+      group.typographyCalibrated
+    ) {
+      return;
+    }
+    const textValue = String(group.originalText || "");
+    if (!textValue.trim()) {
+      group.typographyCalibrated = true;
+      return;
+    }
+    const rect = getEditableGroupMaskRect(group);
+    if (!rect) {
+      group.typographyCalibrated = true;
+      return;
+    }
+
+    const canvasWidth = Number(entry.backgroundCanvas.width || 0);
+    const canvasHeight = Number(entry.backgroundCanvas.height || 0);
+    const left = clamp(rect.left, 0, Math.max(canvasWidth - 1, 0));
+    const top = clamp(rect.top, 0, Math.max(canvasHeight - 1, 0));
+    const width = clamp(rect.width, 2, Math.max(canvasWidth - left, 2));
+    const height = clamp(rect.height, 2, Math.max(canvasHeight - top, 2));
+    const context = entry.backgroundCanvas.getContext("2d", { alpha: true });
+    if (!context) {
+      group.typographyCalibrated = true;
+      return;
+    }
+
+    let imageData = null;
+    try {
+      imageData = context.getImageData(left, top, width, height);
+    } catch (error) {
+      group.typographyCalibrated = true;
+      return;
+    }
+    if (!imageData) {
+      group.typographyCalibrated = true;
+      return;
+    }
+
+    const data = imageData.data || new Uint8ClampedArray(0);
+    let sumDark = 0;
+    let maxDark = 0;
+    const pixels = Math.max(width * height, 1);
+    for (let index = 0; index < pixels; index += 1) {
+      const offset = index * 4;
+      const alpha = Number(data[offset + 3] || 0) / 255;
+      const r = Number(data[offset] || 255);
+      const g = Number(data[offset + 1] || 255);
+      const b = Number(data[offset + 2] || 255);
+      const luminance = r * 0.2126 + g * 0.7152 + b * 0.0722;
+      const darkness = (255 - luminance) * alpha;
+      sumDark += darkness;
+      if (darkness > maxDark) {
+        maxDark = darkness;
+      }
+    }
+    const avgDark = sumDark / pixels;
+    const threshold = clamp(avgDark + (maxDark - avgDark) * 0.42, 18, 160);
+    const referenceMask = buildBinaryMaskFromImageData(imageData, threshold);
+    const referenceBounds = findBinaryMaskBounds(referenceMask, width, height);
+    let referenceCount = 0;
+    referenceMask.forEach((value) => {
+      if (value) {
+        referenceCount += 1;
+      }
+    });
+    if (referenceCount < 8 || !referenceBounds) {
+      group.typographyCalibrated = true;
+      return;
+    }
+
+    const baseSize = Math.max(Number(group.originalFontSize || 8), 8);
+    const baseScale = clamp(Number(group.originalFontScaleX || group.fontScaleX || 1), 0.5, 2.2);
+    const baseAscent = clamp(Number(group.originalAscent || 0.82), 0.5, 0.95);
+    const candidateSizeFactors = [0.9, 0.94, 0.98, 1, 1.02, 1.06, 1.1];
+    const candidateScaleFactors = [0.86, 0.92, 0.98, 1, 1.02, 1.08, 1.14];
+    const candidateAscentOffsets = [-0.04, -0.02, 0, 0.02, 0.04];
+
+    let best = null;
+    candidateSizeFactors.forEach((sizeFactor) => {
+      const candidateSize = clamp(baseSize * sizeFactor, 6, 180);
+      candidateScaleFactors.forEach((scaleFactor) => {
+        const candidateScale = clamp(baseScale * scaleFactor, 0.5, 2.2);
+        candidateAscentOffsets.forEach((ascentOffset) => {
+          const candidateAscent = clamp(baseAscent + ascentOffset, 0.5, 0.95);
+          const candidateMask = renderCandidateTextMask({
+            width,
+            height,
+            text: textValue,
+            fontFamily: group.originalFontFamily || state.fontFamily,
+            fontWeight: group.originalFontWeight || "400",
+            fontStyle: group.originalFontStyle || "normal",
+            fontSize: candidateSize,
+            fontScaleX: candidateScale,
+            charSpacing: Number(group.originalCharSpacing || 0),
+            padX: Number(group.paddingX || 0),
+            padY: Number(group.paddingY || 0),
+            ascent: candidateAscent,
+          });
+          const score = scoreBinaryMasks(referenceMask, candidateMask);
+          if (!best || score < best.score) {
+            best = {
+              score,
+              fontSize: candidateSize,
+              fontScaleX: candidateScale,
+              ascent: candidateAscent,
+            };
+          }
+        });
+      });
+    });
+
+    if (best) {
+      const bestMask = renderCandidateTextMask({
+        width,
+        height,
+        text: textValue,
+        fontFamily: group.originalFontFamily || state.fontFamily,
+        fontWeight: group.originalFontWeight || "400",
+        fontStyle: group.originalFontStyle || "normal",
+        fontSize: best.fontSize,
+        fontScaleX: best.fontScaleX,
+        charSpacing: Number(group.originalCharSpacing || 0),
+        padX: Number(group.paddingX || 0),
+        padY: Number(group.paddingY || 0),
+        ascent: best.ascent,
+        offsetX: 0,
+        offsetY: 0,
+      });
+      const bestBounds = findBinaryMaskBounds(bestMask, width, height);
+      const offsetX = bestBounds ? clamp(referenceBounds.minX - bestBounds.minX, -3.5, 3.5) : 0;
+      const offsetY = bestBounds ? clamp(referenceBounds.minY - bestBounds.minY, -2.5, 2.5) : 0;
+      group.originalFontSize = best.fontSize;
+      group.editFontSize = best.fontSize;
+      group.originalFontScaleX = best.fontScaleX;
+      group.fontScaleX = best.fontScaleX;
+      group.originalAscent = best.ascent;
+      group.originalInkOffsetX = offsetX;
+      group.originalInkOffsetY = offsetY;
+      group.editFontFamily = group.originalFontFamily;
+      group.editFontWeight = group.originalFontWeight;
+      group.editFontStyle = group.originalFontStyle;
+      group.editCharSpacing = Number(group.originalCharSpacing || 0);
+    }
+    group.typographyCalibrated = true;
   }
 
   function closeInlineEditor(entry, commit) {
@@ -2113,6 +3332,9 @@
 
     refreshEditableVisualsForEntry(entry);
     entry.fabric.requestRenderAll();
+    if (entry.index === state.currentPageIndex) {
+      syncPropertyPanelFromSelection();
+    }
   }
 
   function closeAllInlineEditors(commit) {
@@ -2131,6 +3353,7 @@
     if (!nodes) {
       return;
     }
+    fineTuneEditableGroupTypography(entry, group);
     recalibrateEditableGroupTypography(group);
     syncEditableTextGeometry(group);
     const { mask } = nodes;
@@ -2138,6 +3361,8 @@
     group.setCoords();
     const padX = Number(group.paddingX ?? 2);
     const padY = Number(group.paddingY ?? 1);
+    const inkOffsetX = Number(group.originalInkOffsetX || 0);
+    const inkOffsetY = Number(group.originalInkOffsetY || 0);
     const groupPoint = getObjectTopLeftOnCanvas(group);
     const maskWidth = Math.max(getScaledObjectDimension(mask, "width"), 8);
     const maskHeight = Math.max(getScaledObjectDimension(mask, "height"), 10);
@@ -2170,6 +3395,13 @@
     const fontStyle = group.hasTextEdit
       ? group.editFontStyle || group.originalFontStyle || "normal"
       : group.originalFontStyle || "normal";
+    const charSpacing = group.hasTextEdit
+      ? Number(
+          typeof group.editCharSpacing === "number"
+            ? group.editCharSpacing
+            : group.originalCharSpacing || 0,
+        )
+      : Number(group.originalCharSpacing || 0);
 
     group.editingActive = true;
     group.livePreviewText = group.isDeletedText ? "" : existingText;
@@ -2184,8 +3416,8 @@
     editor.type = "text";
     editor.className = "inline-editor-input";
     editor.value = group.isDeletedText ? "" : existingText;
-    editor.style.left = `${canvasOffsetX + (groupPoint.x + padX) * scaleX}px`;
-    editor.style.top = `${canvasOffsetY + (groupPoint.y + padY) * scaleY}px`;
+    editor.style.left = `${canvasOffsetX + (groupPoint.x + padX + inkOffsetX) * scaleX}px`;
+    editor.style.top = `${canvasOffsetY + (groupPoint.y + padY + inkOffsetY) * scaleY}px`;
     editor.style.width = `${Math.max((maskWidth - padX * 2) * scaleX, 8)}px`;
     editor.style.height = `${Math.max(
       (Math.max(maskHeight - padY * 2, Math.max(fontSize * 1.25, 14)) + 2) * scaleY,
@@ -2201,6 +3433,7 @@
     editor.style.lineHeight = `${Math.max(fontSize * 1.12 * scaleY, 12)}px`;
     editor.style.textAlign = "left";
     editor.style.padding = "0";
+    editor.style.letterSpacing = `${(Math.max(charSpacing, -500) / 1000) * fontSize * scaleX}px`;
     editor.style.transform = "translateZ(0)";
     editor.style.webkitFontSmoothing = "antialiased";
     editor.style.textRendering = "optimizeLegibility";
@@ -2221,8 +3454,8 @@
       const currentPoint = getObjectTopLeftOnCanvas(group);
       const currentMaskWidth = Math.max(getScaledObjectDimension(currentMask, "width"), 8);
       const currentMaskHeight = Math.max(getScaledObjectDimension(currentMask, "height"), 10);
-      editor.style.left = `${canvasOffsetX + (currentPoint.x + padX) * scaleX}px`;
-      editor.style.top = `${canvasOffsetY + (currentPoint.y + padY) * scaleY}px`;
+      editor.style.left = `${canvasOffsetX + (currentPoint.x + padX + inkOffsetX) * scaleX}px`;
+      editor.style.top = `${canvasOffsetY + (currentPoint.y + padY + inkOffsetY) * scaleY}px`;
       editor.style.width = `${Math.max((currentMaskWidth - padX * 2) * scaleX, 8)}px`;
       editor.style.height = `${Math.max(
         (Math.max(currentMaskHeight - padY * 2, Math.max(fontSize * 1.25, 14)) + 2) * scaleY,
@@ -2442,7 +3675,7 @@
         return;
       }
       const estimatedFontSize = Math.max(
-        Math.min(fontHeight * 1.08, clampedHeight * 0.98),
+        Math.min(fontHeight, clampedHeight * 0.96),
         8,
       );
       const measuredTextWidth = measureSingleLineTextWidth(
@@ -2452,7 +3685,7 @@
         fontTraits.fontWeight,
         fontTraits.fontStyle,
       );
-      const generousMeasuredWidth = Math.max(measuredTextWidth * 1.08 + 4, 8);
+      const generousMeasuredWidth = Math.max(measuredTextWidth * 1.03 + 2, 8);
       let normalizedWidth = width;
       if (
         Number.isFinite(measuredTextWidth) &&
@@ -2483,6 +3716,8 @@
         fontFamily: fontTraits.fontFamily,
         fontWeight: fontTraits.fontWeight,
         fontStyle: fontTraits.fontStyle,
+        charSpacing: 0,
+        originalAscent: ascent,
         fontScaleX: deriveFontScaleX(
           value,
           fontTraits.fontFamily,
@@ -2563,6 +3798,7 @@
           "Edit Text ready. Double-click to edit, drag to move, arrow keys nudge, Delete removes text.",
         );
       }
+      syncPropertyPanelFromSelection();
     } catch (error) {
       console.error(error);
       setStatus("Failed to detect text boxes.", true);
@@ -2631,6 +3867,8 @@
         fontFamily: "Arial, sans-serif",
         fontWeight: "400",
         fontStyle: "normal",
+        charSpacing: 0,
+        originalAscent: 0.82,
         fontScaleX: 1,
         source: "ocr",
         paddingX: 0,
@@ -2733,9 +3971,11 @@
       }
       setStatus("Detecting text boxes...");
       prepareEditTextMode();
+      syncPropertyPanelFromSelection();
       return;
     }
 
+    syncPropertyPanelFromSelection();
     setStatus(`Tool: ${toolName}`);
   }
 
@@ -2786,6 +4026,7 @@
     refreshEditableVisualsForEntry(entry);
     entry.fabric.requestRenderAll();
     saveHistory(entry);
+    syncPropertyPanelFromSelection();
     setStatus("Selection deleted.");
   }
 
@@ -2915,6 +4156,7 @@
       return;
     }
     restoreHistory(entry, entry.historyIndex - 1);
+    syncPropertyPanelFromSelection();
     setStatus("Undo");
   }
 
@@ -2924,6 +4166,7 @@
       return;
     }
     restoreHistory(entry, entry.historyIndex + 1);
+    syncPropertyPanelFromSelection();
     setStatus("Redo");
   }
 
@@ -2939,7 +4182,9 @@
     });
   }
 
-  function prepareEntryForExport(entry) {
+  function prepareEntryForExport(entry, options) {
+    const exportOptions = options || {};
+    const skipEditableText = Boolean(exportOptions.skipEditableText);
     if (entry && entry.fabric && typeof entry.fabric.discardActiveObject === "function") {
       entry.fabric.discardActiveObject();
     }
@@ -2957,6 +4202,10 @@
         return;
       }
       if (isEditableTextGroup(object)) {
+        if (skipEditableText) {
+          object.visible = false;
+          return;
+        }
         const moved = isEditableGroupMoved(object);
         const changed = Boolean(object.hasTextEdit || moved);
         if (changed) {
@@ -3061,6 +4310,191 @@
     return { restoreRecords, tempObjects };
   }
 
+  function collectVectorTextOperations(entry) {
+    if (!entry || !entry.fabric) {
+      return [];
+    }
+    const operations = [];
+    entry.fabric.getObjects().forEach((object) => {
+      if (!isEditableTextGroup(object)) {
+        return;
+      }
+      const moved = isEditableGroupMoved(object);
+      const changed = Boolean(object.hasTextEdit || moved);
+      if (!changed) {
+        return;
+      }
+      const nodes = getEditableGroupNodes(object);
+      if (!nodes) {
+        return;
+      }
+      const { mask } = nodes;
+      const baseLeft = Number(
+        typeof object.baseLeft === "number" ? object.baseLeft : object.left || 0,
+      );
+      const baseTop = Number(
+        typeof object.baseTop === "number" ? object.baseTop : object.top || 0,
+      );
+      const baseWidth = Math.max(getEditableGroupBaseDimension(object, mask, "width"), 2);
+      const baseHeight = Math.max(getEditableGroupBaseDimension(object, mask, "height"), 2);
+      const movedPoint = getObjectTopLeftOnCanvas(object);
+      const currentLeft = Number(movedPoint.x || object.left || 0);
+      const currentTop = Number(movedPoint.y || object.top || 0);
+      const currentWidth = Math.max(getScaledObjectDimension(mask, "width"), 2);
+      const currentHeight = Math.max(getScaledObjectDimension(mask, "height"), 2);
+      const textValue = object.isDeletedText
+        ? ""
+        : object.hasTextEdit
+          ? object.editedText || object.originalText || ""
+          : object.originalText || "";
+      const fontFamily = object.hasTextEdit
+        ? object.editFontFamily || object.originalFontFamily || state.fontFamily
+        : object.originalFontFamily || state.fontFamily;
+      const fontSize = object.hasTextEdit
+        ? Number(object.editFontSize || object.originalFontSize || state.fontSize)
+        : Number(object.originalFontSize || state.fontSize);
+      const fontWeight = object.hasTextEdit
+        ? object.editFontWeight || object.originalFontWeight || "400"
+        : object.originalFontWeight || "400";
+      const fontStyle = object.hasTextEdit
+        ? object.editFontStyle || object.originalFontStyle || "normal"
+        : object.originalFontStyle || "normal";
+      const charSpacing = object.hasTextEdit
+        ? Number(
+            typeof object.editCharSpacing === "number"
+              ? object.editCharSpacing
+              : object.originalCharSpacing || 0,
+          )
+        : Number(object.originalCharSpacing || 0);
+      const fontScaleX = clamp(
+        Number(object.fontScaleX || object.originalFontScaleX || 1),
+        0.5,
+        2.2,
+      );
+      operations.push({
+        eraseRects: [
+          {
+            left: baseLeft,
+            top: baseTop,
+            width: baseWidth,
+            height: baseHeight,
+            fillColor: object.maskFillColor || "#ffffff",
+          },
+          {
+            left: currentLeft,
+            top: currentTop,
+            width: currentWidth,
+            height: currentHeight,
+            fillColor: object.maskFillColor || "#ffffff",
+          },
+        ],
+        left: currentLeft,
+        top: currentTop,
+        padX: Number(object.paddingX ?? 0),
+        padY: Number(object.paddingY ?? 0),
+        inkOffsetX: Number(object.originalInkOffsetX || 0),
+        inkOffsetY: Number(object.originalInkOffsetY || 0),
+        text: textValue,
+        textColor: object.textFillColor || state.textColor,
+        fontFamily,
+        fontSize,
+        fontWeight,
+        fontStyle,
+        charSpacing,
+        fontScaleX,
+        ascent: clamp(Number(object.originalAscent || 0.82), 0.5, 0.95),
+      });
+    });
+    return operations;
+  }
+
+  async function drawVectorTextEditsOnPage(pdfDoc, page, entry, operations, fontCache) {
+    if (!operations || !operations.length || !entry || !entry.viewport) {
+      return;
+    }
+    const pageWidth = Number(page.getWidth() || 0);
+    const pageHeight = Number(page.getHeight() || 0);
+    const sourceWidth = Math.max(Number(entry.viewport.width || 1), 1);
+    const sourceHeight = Math.max(Number(entry.viewport.height || 1), 1);
+    const scaleX = pageWidth / sourceWidth;
+    const scaleY = pageHeight / sourceHeight;
+    const drawnEraseRects = new Set();
+
+    operations.forEach((op) => {
+      (op.eraseRects || []).forEach((rect) => {
+        const x = Number(rect.left || 0) * scaleX;
+        const y = pageHeight - (Number(rect.top || 0) + Number(rect.height || 0)) * scaleY;
+        const width = Math.max(Number(rect.width || 0) * scaleX, 0.2);
+        const height = Math.max(Number(rect.height || 0) * scaleY, 0.2);
+        const key = `${Math.round(x * 10)}:${Math.round(y * 10)}:${Math.round(
+          width * 10,
+        )}:${Math.round(height * 10)}`;
+        if (drawnEraseRects.has(key)) {
+          return;
+        }
+        drawnEraseRects.add(key);
+        page.drawRectangle({
+          x,
+          y,
+          width,
+          height,
+          color: parseColorForPdf(rect.fillColor),
+          borderWidth: 0,
+        });
+      });
+    });
+
+    for (let index = 0; index < operations.length; index += 1) {
+      const op = operations[index];
+      const textValue = String(op.text || "");
+      if (!textValue.trim()) {
+        continue;
+      }
+      const embeddedFont = await getEmbeddedFontForOperation(pdfDoc, fontCache, op);
+      const font = embeddedFont.font;
+      const textColor = parseColorForPdf(op.textColor);
+      const pxFontSize = Math.max(Number(op.fontSize || 8), 1);
+      const drawSize = Math.max(pxFontSize * scaleY, 1);
+      const ascent = clamp(Number(op.ascent || 0.82), 0.5, 0.95);
+      const inkOffsetX = Number(op.inkOffsetX || 0);
+      const inkOffsetY = Number(op.inkOffsetY || 0);
+      const drawY =
+        pageHeight -
+        (Number(op.top || 0) + Number(op.padY || 0) + inkOffsetY + pxFontSize * ascent) * scaleY;
+      let drawX = (Number(op.left || 0) + Number(op.padX || 0) + inkOffsetX) * scaleX;
+      const tracking = Number(op.charSpacing || 0) / 1000;
+      const horizontalScale = clamp(Number(op.fontScaleX || 1), 0.5, 2.2);
+      const needsGlyphPlacement =
+        Math.abs(tracking) > 0.001 || Math.abs(horizontalScale - 1) > 0.015;
+
+      if (!needsGlyphPlacement) {
+        page.drawText(textValue, {
+          x: drawX,
+          y: drawY,
+          size: drawSize,
+          font,
+          color: textColor,
+          lineHeight: drawSize * 1.06,
+        });
+        continue;
+      }
+
+      for (let charIndex = 0; charIndex < textValue.length; charIndex += 1) {
+        const glyph = textValue[charIndex];
+        page.drawText(glyph, {
+          x: drawX,
+          y: drawY,
+          size: drawSize,
+          font,
+          color: textColor,
+          lineHeight: drawSize * 1.06,
+        });
+        const glyphAdvance = font.widthOfTextAtSize(glyph, drawSize);
+        drawX += (glyphAdvance + tracking * drawSize) * horizontalScale;
+      }
+    }
+  }
+
   function restoreEntryAfterExport(entry, preparedState) {
     const stateForEntry = preparedState || {};
     const restoreRecords = Array.isArray(stateForEntry.restoreRecords)
@@ -3103,8 +4537,209 @@
     URL.revokeObjectURL(url);
   }
 
+  function bytesToBase64(bytes) {
+    const safeBytes = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+    if (!safeBytes.length) {
+      return "";
+    }
+    const chunkSize = 0x8000;
+    let binary = "";
+    for (let offset = 0; offset < safeBytes.length; offset += chunkSize) {
+      const chunk = safeBytes.subarray(offset, offset + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    return window.btoa(binary);
+  }
+
+  function base64ToBytes(base64Value) {
+    const raw = String(base64Value || "");
+    if (!raw) {
+      return new Uint8Array();
+    }
+    const binary = window.atob(raw);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+  }
+
+  function collectExactBackendTextOps() {
+    const operations = [];
+    state.pageEntries.forEach((entry) => {
+      if (!entry || !entry.fabric) {
+        return;
+      }
+      const sourceWidth = Math.max(Number(entry.viewport && entry.viewport.width ? entry.viewport.width : 1), 1);
+      const sourceHeight = Math.max(
+        Number(entry.viewport && entry.viewport.height ? entry.viewport.height : 1),
+        1,
+      );
+      entry.fabric.getObjects().forEach((object) => {
+        if (!isEditableTextGroup(object)) {
+          return;
+        }
+        const moved = isEditableGroupMoved(object);
+        const changed = Boolean(object.hasTextEdit || moved);
+        if (!changed) {
+          return;
+        }
+        const nodes = getEditableGroupNodes(object);
+        if (!nodes) {
+          return;
+        }
+        const { mask } = nodes;
+        const baseLeft = Number(
+          typeof object.baseLeft === "number" ? object.baseLeft : object.left || 0,
+        );
+        const baseTop = Number(
+          typeof object.baseTop === "number" ? object.baseTop : object.top || 0,
+        );
+        const baseWidth = Math.max(getEditableGroupBaseDimension(object, mask, "width"), 2);
+        const baseHeight = Math.max(getEditableGroupBaseDimension(object, mask, "height"), 2);
+        const movedPoint = getObjectTopLeftOnCanvas(object);
+        const currentLeft = Number(movedPoint.x || object.left || 0);
+        const currentTop = Number(movedPoint.y || object.top || 0);
+        const currentWidth = Math.max(getScaledObjectDimension(mask, "width"), 2);
+        const currentHeight = Math.max(getScaledObjectDimension(mask, "height"), 2);
+        const textValue = object.isDeletedText
+          ? ""
+          : object.hasTextEdit
+            ? object.editedText || object.originalText || ""
+            : object.originalText || "";
+        const fontFamily = object.hasTextEdit
+          ? object.editFontFamily || object.originalFontFamily || state.fontFamily
+          : object.originalFontFamily || state.fontFamily;
+        const fontSize = object.hasTextEdit
+          ? Number(object.editFontSize || object.originalFontSize || state.fontSize)
+          : Number(object.originalFontSize || state.fontSize);
+        const fontWeight = object.hasTextEdit
+          ? object.editFontWeight || object.originalFontWeight || "400"
+          : object.originalFontWeight || "400";
+        const fontStyle = object.hasTextEdit
+          ? object.editFontStyle || object.originalFontStyle || "normal"
+          : object.originalFontStyle || "normal";
+        const charSpacing = object.hasTextEdit
+          ? Number(
+              typeof object.editCharSpacing === "number"
+                ? object.editCharSpacing
+                : object.originalCharSpacing || 0,
+            )
+          : Number(object.originalCharSpacing || 0);
+        operations.push({
+          pageIndex: Number(entry.index || 0),
+          sourceWidth,
+          sourceHeight,
+          originalText: String(object.originalText || ""),
+          baseRect: {
+            left: baseLeft,
+            top: baseTop,
+            width: baseWidth,
+            height: baseHeight,
+          },
+          currentRect: {
+            left: currentLeft,
+            top: currentTop,
+            width: currentWidth,
+            height: currentHeight,
+          },
+          padX: Number(object.paddingX ?? 0),
+          padY: Number(object.paddingY ?? 0),
+          inkOffsetX: Number(object.originalInkOffsetX || 0),
+          inkOffsetY: Number(object.originalInkOffsetY || 0),
+          text: textValue,
+          fontFamily,
+          fontSize,
+          fontWeight,
+          fontStyle,
+          charSpacing,
+          fontScaleX: clamp(Number(object.fontScaleX || object.originalFontScaleX || 1), 0.5, 2.2),
+          ascent: clamp(Number(object.originalAscent || 0.82), 0.5, 0.95),
+          textColor: object.textFillColor || state.textColor,
+          maskFillColor: object.maskFillColor || "#ffffff",
+          strictFit: true,
+          microCalibration: true,
+        });
+      });
+    });
+    return operations;
+  }
+
+  async function refreshExactExportAvailability(forceRefresh) {
+    if (!forceRefresh && typeof state.exactExportAvailable === "boolean") {
+      return state.exactExportAvailable;
+    }
+    try {
+      const response = await fetch(EXACT_EXPORT_HEALTH_URL, {
+        method: "GET",
+      });
+      const ok = Boolean(response && response.ok);
+      state.exactExportAvailable = ok;
+      return ok;
+    } catch (error) {
+      state.exactExportAvailable = false;
+      return false;
+    }
+  }
+
+  async function applyExactTextExportBackend() {
+    const textOps = collectExactBackendTextOps();
+    if (!textOps.length) {
+      return {
+        usedBackend: false,
+        bytes: state.originalPdfBytes,
+      };
+    }
+    const backendAvailable = await refreshExactExportAvailability(true);
+    if (!backendAvailable) {
+      return {
+        usedBackend: false,
+        bytes: state.originalPdfBytes,
+      };
+    }
+
+    const payload = {
+      fileName: state.currentFileName,
+      pdfBase64: bytesToBase64(state.originalPdfBytes),
+      operations: textOps,
+    };
+    const response = await fetch(EXACT_EXPORT_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw new Error(`Exact export backend failed with status ${response.status}`);
+    }
+    const data = await response.json();
+    const outputBase64 = data && typeof data.pdfBase64 === "string" ? data.pdfBase64 : "";
+    if (!outputBase64) {
+      throw new Error("Exact export backend returned empty PDF payload.");
+    }
+    return {
+      usedBackend: true,
+      bytes: base64ToBytes(outputBase64),
+    };
+  }
+
   async function buildEditedPdfBytes() {
     try {
+      try {
+        const backendResult = await applyExactTextExportBackend();
+        if (backendResult.usedBackend) {
+          setStatus("Exact text backend applied. Finishing export...");
+          return await exportPdfViaOriginal({
+            basePdfBytes: backendResult.bytes,
+            forceSkipEditableText: true,
+            forceDisableVectorText: true,
+          });
+        }
+      } catch (backendError) {
+        console.error(backendError);
+        state.exactExportAvailable = false;
+      }
       return await exportPdfViaOriginal();
     } catch (primaryError) {
       console.error(primaryError);
@@ -3121,6 +4756,9 @@
     if (!state.splitRanges.length) {
       setStatus("Add at least one split range.", true);
       return;
+    }
+    if (state.beforePreview) {
+      setBeforePreview(false);
     }
     closeAllInlineEditors(true);
 
@@ -3169,9 +4807,14 @@
     }
   }
 
-  async function exportPdfViaOriginal() {
-    const pdfDoc = await pdfLib.PDFDocument.load(state.originalPdfBytes);
+  async function exportPdfViaOriginal(options) {
+    const exportOptions = options || {};
+    const basePdfBytes = exportOptions.basePdfBytes || state.originalPdfBytes;
+    const forceSkipEditableText = Boolean(exportOptions.forceSkipEditableText);
+    const forceDisableVectorText = Boolean(exportOptions.forceDisableVectorText);
+    const pdfDoc = await pdfLib.PDFDocument.load(basePdfBytes);
     const pages = pdfDoc.getPages();
+    const standardFontCache = {};
 
     for (let index = 0; index < pages.length; index += 1) {
       const entry = state.pageEntries[index];
@@ -3179,11 +4822,15 @@
         continue;
       }
 
-      const preparedState = prepareEntryForExport(entry);
+      const useVectorText = state.vectorTextExport && !forceDisableVectorText;
+      const vectorTextOps = useVectorText ? collectVectorTextOperations(entry) : [];
+      const preparedState = prepareEntryForExport(entry, {
+        skipEditableText: forceSkipEditableText || useVectorText,
+      });
       try {
         const overlayPng = entry.fabric.toDataURL({
           format: "png",
-          multiplier: 2,
+          multiplier: EXPORT_OVERLAY_MULTIPLIER,
           enableRetinaScaling: false,
         });
         const image = await pdfDoc.embedPng(overlayPng);
@@ -3195,6 +4842,9 @@
           width: size.width,
           height: size.height,
         });
+        if (useVectorText && vectorTextOps.length) {
+          await drawVectorTextEditsOnPage(pdfDoc, page, entry, vectorTextOps, standardFontCache);
+        }
       } finally {
         restoreEntryAfterExport(entry, preparedState);
       }
@@ -3255,6 +4905,9 @@
   async function exportPdf() {
     if (!state.originalPdfBytes || !state.pageEntries.length) {
       return;
+    }
+    if (state.beforePreview) {
+      setBeforePreview(false);
     }
     closeAllInlineEditors(true);
 
@@ -3329,6 +4982,7 @@
     refreshEditableVisualsForEntry(entry);
     entry.fabric.requestRenderAll();
     saveHistory(entry);
+    syncPropertyPanelFromSelection();
   }
 
   function hookCanvasEvents(entry) {
@@ -3356,6 +5010,9 @@
       entry.fabric.requestRenderAll();
       saveHistory(entry);
       updateUndoRedoButtons();
+      if (entry.index === state.currentPageIndex) {
+        syncPropertyPanelFromSelection();
+      }
     });
 
     entry.fabric.on("object:moving", (event) => {
@@ -3445,6 +5102,27 @@
       }
       saveHistory(entry);
       updateUndoRedoButtons();
+    });
+
+    entry.fabric.on("selection:created", () => {
+      if (entry.index !== state.currentPageIndex) {
+        return;
+      }
+      syncPropertyPanelFromSelection();
+    });
+
+    entry.fabric.on("selection:updated", () => {
+      if (entry.index !== state.currentPageIndex) {
+        return;
+      }
+      syncPropertyPanelFromSelection();
+    });
+
+    entry.fabric.on("selection:cleared", () => {
+      if (entry.index !== state.currentPageIndex) {
+        return;
+      }
+      syncPropertyPanelFromSelection();
     });
 
     entry.fabric.on("mouse:dblclick", (options) => {
@@ -3615,6 +5293,8 @@
     updatePagePositionLabel();
     updatePageButtons();
     updateUndoRedoButtons();
+    applyBeforePreviewToEntry(getCurrentEntry());
+    syncPropertyPanelFromSelection();
     setStatus(`Viewing page ${index + 1}`);
   }
 
@@ -3758,6 +5438,21 @@
       state.fontSize = Number(event.target.value);
       applyPropertiesToActiveSelection();
     });
+
+    if (ui.letterSpacingInput) {
+      ui.letterSpacingInput.addEventListener("input", (event) => {
+        applyLetterSpacingToSelection(event.target.value);
+      });
+    }
+    if (ui.autoMatchTextBtn) {
+      ui.autoMatchTextBtn.addEventListener("click", autoMatchAllEditableText);
+    }
+    if (ui.vectorTextExportInput) {
+      ui.vectorTextExportInput.checked = Boolean(state.vectorTextExport);
+      ui.vectorTextExportInput.addEventListener("change", (event) => {
+        state.vectorTextExport = Boolean(event.target.checked);
+      });
+    }
   }
 
   function setupDragDrop() {
@@ -4010,6 +5705,11 @@
     ui.undoBtn.addEventListener("click", undo);
     ui.redoBtn.addEventListener("click", redo);
     ui.clearPageBtn.addEventListener("click", clearCurrentPage);
+    if (ui.beforeAfterBtn) {
+      ui.beforeAfterBtn.addEventListener("click", () => {
+        setBeforePreview(!state.beforePreview);
+      });
+    }
     if (ui.zoomOutBtn) {
       ui.zoomOutBtn.addEventListener("click", () => {
         nudgePageZoom(-1);
@@ -4048,6 +5748,9 @@
     }
     if (ui.splitPdfBtn) {
       ui.splitPdfBtn.addEventListener("click", splitPdfByRanges);
+    }
+    if (ui.splitSectionBtn) {
+      ui.splitSectionBtn.addEventListener("click", focusSplitPanelSection);
     }
     if (ui.splitFromInput) {
       ui.splitFromInput.addEventListener("input", syncSplitInputBounds);
@@ -4088,13 +5791,21 @@
     if (ui.ocrLangSelect) {
       state.ocrLanguage = ui.ocrLangSelect.value;
     }
+    if (ui.vectorTextExportInput) {
+      state.vectorTextExport = Boolean(ui.vectorTextExportInput.checked);
+    }
     syncSplitInputBounds();
     renderSplitRanges();
     updateZoomControls();
+    setLetterSpacingUiValue(0);
     bindEvents();
     applyLanguageUI();
     updateToolButtonState();
     updateActionButtons();
+    updateFontInspector();
+    refreshExactExportAvailability(true).catch(() => {
+      state.exactExportAvailable = false;
+    });
     setStatus("Ready. Open a PDF to start editing.");
   }
 
