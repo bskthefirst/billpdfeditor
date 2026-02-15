@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sticker PDF Lab - SVG Converter</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Gaegu:wght@400;700&family=IBM+Plex+Sans:wght@400;600&family=Permanent+Marker&family=VT323&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css?v=20260213-24" />
+  </head>
+  <body class="svg-page">
+    <div class="app-shell">
+      <header class="topbar">
+        <button
+          id="langToggleBtn"
+          class="ghost-btn lang-toggle-btn"
+          type="button"
+          aria-label="Toggle interface language"
+        >
+          <span class="flag-chip flag-chip-us" aria-hidden="true"><span class="flag-icon">🇺🇸</span></span>
+          <span class="flag-swap" aria-hidden="true">⇄</span>
+          <span class="flag-chip flag-chip-kr" aria-hidden="true"><span class="flag-icon">🇰🇷</span></span>
+        </button>
+        <div class="brand">
+          <span class="brand-dot"></span>
+          <div class="brand-copy">
+            <h1 id="brandTitle">Sticker PDF Lab</h1>
+            <p id="brandSubtitle">Raster to SVG with maximum quality output.</p>
+          </div>
+          <div class="brand-motion" aria-hidden="true">
+            <div class="logo-marquee">
+              <div class="logo-track">
+                <span class="logo-word">SVG</span>
+              </div>
+            </div>
+            <div class="star-spinner">
+              <span class="star-core"></span>
+            </div>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <a id="backEditorBtn" class="ghost-btn" href="index.html">⬅ Back to Editor</a>
+        </div>
+      </header>
+
+      <div class="svg-workspace">
+        <section class="svg-panel svg-convert-panel">
+          <h2 id="svgHeading">🧩 SVG Converter</h2>
+          <p id="svgNote" class="svg-note">
+            Upload JPG or PNG. Conversion uses lossless image embedding inside SVG for maximum visual quality.
+          </p>
+
+          <label id="svgDropzone" class="svg-dropzone" for="svgFileInput">
+            <span id="svgDropHint">Drop JPG/PNG here or click to upload</span>
+          </label>
+          <input id="svgFileInput" class="svg-hidden-input" type="file" accept="image/png,image/jpeg" />
+
+          <div class="svg-controls">
+            <label class="svg-control-mode">
+              <span id="svgModeLabel">Mode</span>
+              <select id="svgModeSelect">
+                <option id="svgModeTraceOpt" value="trace">High-Detail Vector Trace</option>
+                <option id="svgModeEmbedOpt" value="embed">Exact Fidelity (Image Embed)</option>
+              </select>
+            </label>
+            <label class="svg-control-mode">
+              <span id="svgPaletteLabel">Palette</span>
+              <select id="svgPaletteSelect">
+                <option id="svgPaletteSrgbOpt" value="srgb">Full RGB (Max Detail)</option>
+                <option id="svgPalettePmsOpt" value="pms">PMS Approx (Spot-like)</option>
+              </select>
+            </label>
+            <label class="svg-control-mode">
+              <span id="svgQualityLabel">Quality</span>
+              <select id="svgQualitySelect">
+                <option id="svgQualityHighOpt" value="high">High (Recommended)</option>
+                <option id="svgQualityUltraOpt" value="ultra">Ultra Slow (Best Accuracy)</option>
+              </select>
+            </label>
+            <label class="svg-control-detail">
+              <span id="svgDetailLabel">Detail</span>
+              <input id="svgDetailInput" type="range" min="1" max="5" step="1" value="5" />
+              <span id="svgDetailValue" class="svg-detail-value">5/5</span>
+            </label>
+          </div>
+
+          <div class="svg-actions">
+            <button id="svgConvertBtn" class="primary-btn" disabled>⚡ Convert to SVG</button>
+            <button id="svgDownloadBtn" class="ghost-btn" disabled>⬇ Download SVG</button>
+          </div>
+
+          <div class="svg-meta">
+            <div class="svg-meta-row">
+              <strong id="metaFileLabel">File</strong>
+              <span id="metaFileValue">-</span>
+            </div>
+            <div class="svg-meta-row">
+              <strong id="metaSizeLabel">Dimensions</strong>
+              <span id="metaSizeValue">-</span>
+            </div>
+            <div class="svg-meta-row">
+              <strong id="metaTypeLabel">Type</strong>
+              <span id="metaTypeValue">-</span>
+            </div>
+            <div class="svg-meta-row">
+              <strong id="metaPaletteLabel">Palette</strong>
+              <span id="metaPaletteValue">sRGB</span>
+            </div>
+            <div class="svg-meta-row">
+              <strong id="metaQualityLabel">Quality</strong>
+              <span id="metaQualityValue">High</span>
+            </div>
+          </div>
+
+          <div id="svgStatusLine" class="svg-status">Ready.</div>
+        </section>
+
+        <aside class="svg-panel svg-preview-panel">
+          <h2 id="previewHeading">Preview</h2>
+          <div class="svg-preview-card">
+            <h3 id="rasterPreviewTitle">Original</h3>
+            <div class="svg-preview-frame">
+              <img id="rasterPreview" class="svg-preview-image" alt="" />
+            </div>
+          </div>
+          <div class="svg-preview-card">
+            <h3 id="svgPreviewTitle">Generated SVG</h3>
+            <div class="svg-preview-frame">
+              <object id="svgPreview" class="svg-preview-object" type="image/svg+xml"></object>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/imagetracerjs@1.2.6/imagetracer_v1.2.6.min.js"></script>
+    <script src="svg-converter.js?v=20260213-06"></script>
+  </body>
+</html>

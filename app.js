@@ -66,6 +66,7 @@
       drop_hint: "Drop a PDF here or click Open PDF",
       ready: "Ready",
       properties: "Properties",
+      svg_page: "🧩 SVG",
       stroke: "Stroke",
       fill: "Fill",
       fill_opacity: "Fill Opacity",
@@ -138,6 +139,7 @@
       drop_hint: "여기에 PDF를 놓거나 'PDF 열기'를 클릭하세요",
       ready: "준비됨",
       properties: "속성",
+      svg_page: "🧩 SVG",
       stroke: "선",
       fill: "채우기",
       fill_opacity: "채우기 투명도",
@@ -278,6 +280,7 @@
     zoomValueLabel: document.getElementById("zoomValueLabel"),
     zoomControlLabel: document.getElementById("zoomControlLabel"),
     propertiesHeading: document.getElementById("propertiesHeading"),
+    svgPageBtn: document.getElementById("svgPageBtn"),
     labelStroke: document.getElementById("labelStroke"),
     labelFill: document.getElementById("labelFill"),
     labelFillOpacity: document.getElementById("labelFillOpacity"),
@@ -1456,6 +1459,9 @@
     }
     if (ui.propertiesHeading) {
       ui.propertiesHeading.textContent = t("properties");
+    }
+    if (ui.svgPageBtn) {
+      ui.svgPageBtn.textContent = t("svg_page");
     }
     if (ui.labelStroke) {
       ui.labelStroke.textContent = t("stroke");
