@@ -75,7 +75,8 @@
       ready: "Ready",
       properties: "Properties",
       svg_page: "🧩 SVG",
-      split_page: "✂️ Split PDF",
+      split_page: "✂️ Split",
+      png_jpg_page: "🖼️ PNG/JPG",
       stroke: "Stroke",
       fill: "Fill",
       fill_opacity: "Fill Opacity",
@@ -162,7 +163,8 @@
       ready: "준비됨",
       properties: "속성",
       svg_page: "🧩 SVG",
-      split_page: "✂️ PDF 분할",
+      split_page: "✂️ 분할",
+      png_jpg_page: "🖼️ PNG/JPG",
       stroke: "선",
       fill: "채우기",
       fill_opacity: "채우기 투명도",
@@ -328,6 +330,7 @@
     propertiesHeading: document.getElementById("propertiesHeading"),
     svgPageBtn: document.getElementById("svgPageBtn"),
     splitSectionBtn: document.getElementById("splitSectionBtn"),
+    pngJpgPageBtn: document.getElementById("pngJpgPageBtn"),
     splitPanelSection: document.getElementById("splitPanelSection"),
     textTuneHeading: document.getElementById("textTuneHeading"),
     labelLetterSpacing: document.getElementById("labelLetterSpacing"),
@@ -1888,10 +1891,13 @@
       ui.propertiesHeading.textContent = t("properties");
     }
     if (ui.svgPageBtn) {
-      ui.svgPageBtn.textContent = t("svg_page");
+      setPanelQuickActionLabel(ui.svgPageBtn, t("svg_page"));
     }
     if (ui.splitSectionBtn) {
-      ui.splitSectionBtn.textContent = t("split_page");
+      setPanelQuickActionLabel(ui.splitSectionBtn, t("split_page"));
+    }
+    if (ui.pngJpgPageBtn) {
+      setPanelQuickActionLabel(ui.pngJpgPageBtn, t("png_jpg_page"));
     }
     if (ui.labelStroke) {
       ui.labelStroke.textContent = t("stroke");
@@ -1987,6 +1993,33 @@
     } else {
       setStatus("Ready. Open a PDF to start editing.");
     }
+  }
+
+  function setPanelQuickActionLabel(element, value) {
+    if (!element) {
+      return;
+    }
+    const raw = String(value || "").trim();
+    if (!raw) {
+      element.textContent = "";
+      return;
+    }
+    const match = raw.match(/^(\S+)\s*(.*)$/);
+    const icon = match ? match[1] : "";
+    const label = match && match[2] ? match[2].trim() : "";
+    let iconNode = element.querySelector(".panel-link-icon");
+    let textNode = element.querySelector(".panel-link-text");
+    if (!iconNode || !textNode) {
+      element.textContent = "";
+      iconNode = document.createElement("span");
+      iconNode.className = "panel-link-icon";
+      textNode = document.createElement("span");
+      textNode.className = "panel-link-text";
+      element.append(iconNode, textNode);
+    }
+    iconNode.textContent = icon;
+    textNode.textContent = label || icon;
+    element.setAttribute("aria-label", label || raw);
   }
 
   function toggleLanguage() {

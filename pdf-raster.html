@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sticker PDF Lab - PNG/JPG Export</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Gaegu:wght@400;700&family=IBM+Plex+Sans:wght@400;600&family=Permanent+Marker&family=VT323&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css?v=20260216-04" />
+  </head>
+  <body class="raster-page">
+    <div class="app-shell">
+      <header class="topbar">
+        <button
+          id="langToggleBtn"
+          class="ghost-btn lang-toggle-btn"
+          type="button"
+          aria-label="Toggle interface language"
+        >
+          <span class="flag-chip flag-chip-us" aria-hidden="true"><span class="flag-icon">🇺🇸</span></span>
+          <span class="flag-swap" aria-hidden="true">⇄</span>
+          <span class="flag-chip flag-chip-kr" aria-hidden="true"><span class="flag-icon">🇰🇷</span></span>
+        </button>
+        <div class="brand">
+          <span class="brand-dot"></span>
+          <div class="brand-copy">
+            <h1 id="brandTitle">Sticker PDF Lab</h1>
+            <p id="brandSubtitle">Convert PDF pages into PNG or JPG files.</p>
+          </div>
+          <div class="brand-motion" aria-hidden="true">
+            <div class="logo-marquee">
+              <div class="logo-track">
+                <span class="logo-word">PNG/JPG</span>
+              </div>
+            </div>
+            <div class="star-spinner">
+              <span class="star-core"></span>
+            </div>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <a id="backEditorBtn" class="ghost-btn" href="index.html">⬅ Back to Editor</a>
+        </div>
+      </header>
+
+      <div class="svg-workspace">
+        <section class="svg-panel svg-convert-panel">
+          <h2 id="rasterHeading">🖼️ PNG/JPG Converter</h2>
+          <p id="rasterNote" class="svg-note">Upload a PDF and export all pages as PNG or JPG.</p>
+
+          <label id="rasterDropzone" class="svg-dropzone" for="rasterFileInput">
+            <span id="rasterDropHint">Drop PDF here or click to upload</span>
+          </label>
+          <input id="rasterFileInput" class="svg-hidden-input" type="file" accept="application/pdf" />
+
+          <div class="svg-controls">
+            <label class="svg-control-mode">
+              <span id="formatLabel">Format</span>
+              <select id="formatSelect">
+                <option value="png">PNG</option>
+                <option value="jpg">JPG</option>
+              </select>
+            </label>
+            <label class="svg-control-mode">
+              <span id="pageLabel">Page</span>
+              <select id="pageSelect" disabled></select>
+            </label>
+            <label class="svg-control-detail">
+              <span id="jpgQualityLabel">JPG Quality</span>
+              <input id="jpgQualityInput" type="range" min="70" max="100" step="1" value="95" />
+              <span id="jpgQualityValue" class="svg-detail-value">95</span>
+            </label>
+          </div>
+
+          <div class="svg-actions">
+            <button id="convertBtn" class="primary-btn" disabled>⚡ Convert Pages</button>
+            <button id="downloadBtn" class="ghost-btn" disabled>⬇ Download Image</button>
+            <button id="downloadAllBtn" class="ghost-btn" disabled>📦 Download All ZIP</button>
+          </div>
+
+          <div class="svg-meta">
+            <div class="svg-meta-row">
+              <strong id="metaFileLabel">File</strong>
+              <span id="metaFileValue">-</span>
+            </div>
+            <div class="svg-meta-row">
+              <strong id="metaPagesLabel">Pages</strong>
+              <span id="metaPagesValue">-</span>
+            </div>
+            <div class="svg-meta-row">
+              <strong id="metaFormatLabel">Format</strong>
+              <span id="metaFormatValue">PNG</span>
+            </div>
+            <div class="svg-meta-row">
+              <strong id="metaPageLabel">Selected Page</strong>
+              <span id="metaPageValue">-</span>
+            </div>
+          </div>
+
+          <div id="rasterStatusLine" class="svg-status">Ready.</div>
+        </section>
+
+        <aside class="svg-panel svg-preview-panel">
+          <h2 id="previewHeading">Preview</h2>
+          <div class="svg-preview-card">
+            <h3 id="pagePreviewTitle">Converted Pages</h3>
+            <div id="previewGrid" class="raster-preview-grid"></div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="pdf-raster.js?v=20260216-03"></script>
+  </body>
+</html>
