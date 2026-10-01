@@ -16,6 +16,8 @@ Everything runs on your device — there is no server and no account.
 - **Real text selection and copy** (drag, double-click a word, triple-click a line, ⌘/Ctrl+C), powered by PDFium's
   reading-order logic.
 - Undo / redo, save (a byte-minimal incremental update: everything you didn't touch is byte-identical).
+- **Protected PDFs.** Files with an owner password or editing restrictions open and are edited as an unprotected copy (the app
+  tells you when the author restricted editing); files that need a password ask for it. Damaged files are rebuilt by PDFium first.
 
 ## Run it
 
@@ -28,7 +30,8 @@ pnpm build                        # production build in dist/
 ```
 
 Optional stress corpus (not committed): `pnpm corpus:external` downloads ~900 regression PDFs from pdf.js into
-`tests/corpus/external`, used by the scripts in `tests/spikes`.
+`tests/corpus/external`, used by the scripts in `tests/spikes`. To check the editor on your own PDFs, put them in
+`tests/corpus/user/` (git-ignored) and run `npx tsx tests/spikes/user-corpus.ts`; it prints counts and timings only, never text.
 
 ## How it works
 
@@ -52,7 +55,7 @@ no-op incremental updates render identically; line-edit geometry is checked agai
 ## Known limits (next on the list)
 
 Paragraph wrapping/re-justification, text inside shared form XObjects (copy-on-write), ligature glyphs, vertical writing,
-Type 3 fonts, encrypted PDFs, exact font matching through the Local Font Access API, and everything in the roadmap beyond
+Type 3 fonts, exact font matching through the Local Font Access API, and everything in the roadmap beyond
 text editing (organize/convert tools).
 
 ## License

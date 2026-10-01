@@ -18,13 +18,30 @@ export default function App() {
   const openBytes = useCallback(async (buf: ArrayBuffer, name: string) => {
     useApp.getState().setStatus('Opening…');
     try {
-      const info = await engine.api.open(buf);
+      // the buffer is transferred to the worker, so keep a copy for password retries
+      const spare = buf.slice(0);
+      let info = await engine.api.open(buf, '');
+      for (let attempt = 0; info.needsPassword && attempt < 3; attempt++) {
+        const pw = window.prompt(attempt ? 'Wrong password. Try again:' : `“${name}” is password-protected. Password:`);
+        if (pw === null) {
+          useApp.getState().setStatus('Open cancelled — the PDF needs a password.', 'warn');
+          return;
+        }
+        info = await engine.api.open(spare.slice(0), pw);
+      }
+      if (info.needsPassword) {
+        useApp.getState().setStatus('That password did not open the PDF.', 'error');
+        return;
+      }
       useApp.getState().setDoc(name, info);
+      const pages = `${info.pages.length} page${info.pages.length === 1 ? '' : 's'} loaded`;
       useApp
         .getState()
         .setStatus(
-          `${info.pages.length} page${info.pages.length === 1 ? '' : 's'} loaded${info.repaired ? ' (file structure was repaired)' : ''}. Click any text to edit it.`,
-          'ok',
+          info.decrypted
+            ? `${pages}. This PDF was protected${info.restricted ? ' and its author restricted editing' : ''}; edits are saved to an unprotected copy, so only edit documents you are allowed to change.`
+            : `${pages}${info.repaired ? ' (file structure was repaired)' : ''}. Click any text to edit it.`,
+          info.restricted ? 'warn' : 'ok',
         );
     } catch (e) {
       useApp.getState().setStatus(`Could not open this PDF: ${e instanceof Error ? e.message : e}`, 'error');

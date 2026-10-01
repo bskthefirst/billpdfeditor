@@ -42,7 +42,7 @@ self.onmessage = async (ev: MessageEvent<Req>) => {
     const transfer: Transferable[] = [];
     switch (method) {
       case 'open':
-        result = s.open(new Uint8Array(args[0] as ArrayBuffer));
+        result = s.open(new Uint8Array(args[0] as ArrayBuffer), (args[1] as string | undefined) ?? '');
         break;
       case 'getLines':
         result = s.getLines(args[0] as number);

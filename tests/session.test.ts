@@ -283,3 +283,34 @@ describe('line editing and reflow', () => {
     expect(originOf(before, 'over').x - originOf(after, 'over').x).toBeCloseTo(3.5, 1);
   });
 });
+
+describe('protected and damaged files', () => {
+  it('opens an owner-restricted PDF through PDFium, edits an unprotected copy, and says so', async () => {
+    const s = await makeSession();
+    const info = s.open(readCorpus('rl_encrypted_owner.pdf'));
+    expect(info.needsPassword).toBeFalsy();
+    expect(info.decrypted).toBe(true);
+    expect(info.restricted).toBe(true);
+    const line = s.getLines(0).find((l) => l.text.startsWith('Protected quarterly'))!;
+    expect(line.editable).toBe(true);
+    expect((await s.setLineText(line.id, 'Protected quarterly summary: revenue grew rapidly')).ok).toBe(true);
+    // the saved file opens with no password at all
+    const core = await loadCore();
+    const doc = core.open(s.save());
+    expect(core.isEncrypted(doc)).toBe(false);
+    core.close(doc);
+    const again = await makeSession();
+    again.open(s.save());
+    expect(again.getLines(0).some((l) => l.text.includes('revenue grew rapidly'))).toBe(true);
+  });
+
+  it('asks for a password when the file needs one, and rejects a wrong one', async () => {
+    const s = await makeSession();
+    expect(s.open(readCorpus('rl_encrypted_user.pdf')).needsPassword).toBe(true);
+    expect(s.open(readCorpus('rl_encrypted_user.pdf'), 'wrong').needsPassword).toBe(true);
+    const ok = s.open(readCorpus('rl_encrypted_user.pdf'), 'secret');
+    expect(ok.needsPassword).toBeFalsy();
+    expect(ok.decrypted).toBe(true);
+    expect(s.getLines(0).some((l) => l.text.includes('Protected quarterly'))).toBe(true);
+  });
+});

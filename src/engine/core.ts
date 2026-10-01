@@ -58,6 +58,16 @@ export interface Bitmap {
   data: Uint8Array;
 }
 
+/** FPDF_LoadMemDocument failed; `needsPassword` when PDFium reports a password error (code 4). */
+export class PdfiumOpenError extends Error {
+  constructor(readonly code: number) {
+    super(`FPDF_LoadMemDocument failed (error ${code})`);
+  }
+  get needsPassword(): boolean {
+    return this.code === 4;
+  }
+}
+
 export class PdfiumCore {
   readonly w: WrappedPdfiumModule;
 
@@ -149,10 +159,22 @@ export class PdfiumCore {
     if (!ptr) {
       const err = this.w.FPDF_GetLastError();
       this.free(bufPtr);
-      throw new Error(`FPDF_LoadMemDocument failed (error ${err})`);
+      throw new PdfiumOpenError(err);
     }
     return { ptr, bufPtr, pageCount: this.w.FPDF_GetPageCount(ptr) };
   }
+  isEncrypted(doc: Doc): boolean {
+    return this.w.EPDF_IsEncrypted(doc.ptr);
+  }
+  /** Removes the encryption dictionary so `save` writes an unprotected copy. */
+  removeEncryption(doc: Doc): boolean {
+    return this.w.EPDF_RemoveEncryption(doc.ptr);
+  }
+  /** PDF permission flags (bit 3 = print, 4 = modify, 5 = copy, 6 = annotate); 0xffffffff when unprotected or owner-unlocked. */
+  permissions(doc: Doc): number {
+    return this.w.FPDF_GetDocPermissions(doc.ptr) >>> 0;
+  }
+
   close(doc: Doc): void {
     this.w.FPDF_CloseDocument(doc.ptr);
     this.free(doc.bufPtr);

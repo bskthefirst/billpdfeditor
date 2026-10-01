@@ -135,6 +135,23 @@ def tj_gaps():
     raw_pdf(os.path.join(OUT, "raw_tj_gaps.pdf"), content)
 
 
+def encrypted():
+    from reportlab.lib.pdfencrypt import StandardEncryption
+
+    def make(name, enc):
+        c = canvas.Canvas(os.path.join(OUT, name), pagesize=letter, encrypt=enc)
+        c.setFont("Helvetica", 14)
+        c.drawString(72, 700, "Protected quarterly summary: revenue grew steadily")
+        c.setFont("Times-Roman", 12)
+        c.drawString(72, 676, "Only the owner may change this document")
+        c.save()
+
+    # empty user password, editing forbidden: opens everywhere, restrictions are advisory
+    make("rl_encrypted_owner.pdf", StandardEncryption("", ownerPassword="owner-secret", canModify=0, canCopy=1, strength=128))
+    # real user password: needs "secret" to open
+    make("rl_encrypted_user.pdf", StandardEncryption("secret", ownerPassword="owner-secret", strength=128))
+
+
 def multipage():
     c = canvas.Canvas(os.path.join(OUT, "rl_multipage.pdf"), pagesize=letter)
     c.setTitle("Corpus: 30 pages")
@@ -153,5 +170,6 @@ if __name__ == "__main__":
     embedded_ttf()
     cmyk_gradient()
     tj_gaps()
+    encrypted()
     multipage()
     print("wrote", sorted(os.listdir(OUT)))

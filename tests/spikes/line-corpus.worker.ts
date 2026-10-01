@@ -15,7 +15,7 @@ export default defineWorker<LineCorpusResult>(async (path) => {
   const bytes = new Uint8Array(readFileSync(path));
   const s = await makeSession();
   const info = s.open(bytes);
-  if (info.encrypted) throw new Error('encrypted');
+  if (info.needsPassword) throw new Error('needs a password');
   const lines = s.getLines(0);
   // a line with a word of 5+ letters somewhere not at the very start
   let pick: {
@@ -60,7 +60,7 @@ export default defineWorker<LineCorpusResult>(async (path) => {
     const tp = core.loadTextPage(pg);
     const text = core
       .textChars(tp)
-      .map((c) => String.fromCodePoint(c.unicode))
+      .map((c) => (c.unicode > 0 && c.unicode <= 0x10ffff ? String.fromCodePoint(c.unicode) : '\ufffd'))
       .join('');
     core.closeTextPage(tp);
     core.closePage(pg);

@@ -4,7 +4,7 @@
  * "reset to original" are trivial and the file never accumulates revisions while typing. It runs inside the engine
  * worker but has no worker dependencies, so tests drive it directly in Node.
  */
-import { PdfiumCore, type Doc } from './core';
+import { PdfiumCore, PdfiumOpenError, type Doc } from './core';
 import type { DocInfo, HistoryState, LineInfo, Mat6, PageInfo, RenderedPage, SetTextResult, Substitution, TextSelection } from './api';
 import { PdfFile, type PdfPage } from '../pdf/file';
 import { TextExtractor, effectiveFontSize, type ContentUnit, type ShowOp } from '../pdf/text';
@@ -72,11 +72,47 @@ export class EngineSession {
     return this.rev;
   }
 
-  open(bytes: Uint8Array): DocInfo {
+  open(bytes: Uint8Array, password = ''): DocInfo {
     this.closeDoc();
-    this.base = PdfFile.load(bytes);
-    this.baseBytes = bytes;
-    this.curBytes = bytes;
+    let work = bytes;
+    let file: PdfFile | null = null;
+    try {
+      file = PdfFile.load(bytes);
+    } catch {
+      file = null; // damaged, or encrypted with compressed object streams: PDFium gets a chance below
+    }
+    let decrypted = false;
+    let restricted = false;
+    let repairedByPdfium = false;
+    if (!file || file.encrypted) {
+      // PDFium reads RC4/AES-protected files (including those with an empty user password) and can write an unprotected
+      // copy; our own parser then works on that copy. It also rewrites damaged files into a clean structure.
+      let doc: Doc;
+      try {
+        doc = this.core.open(bytes, password);
+      } catch (e) {
+        if (e instanceof PdfiumOpenError && e.needsPassword)
+          return { pages: [], repaired: false, decrypted: false, restricted: false, needsPassword: true };
+        throw e;
+      }
+      try {
+        const perms = this.core.permissions(doc);
+        if (doc.pageCount === 0 && this.core.isEncrypted(doc))
+          throw new Error('This PDF uses an encryption method that could not be unlocked without its password.');
+        if (this.core.isEncrypted(doc)) {
+          decrypted = true;
+          restricted = perms !== 0xffffffff && (perms & 0x8) === 0; // bit 4: modify contents
+          this.core.removeEncryption(doc);
+        } else repairedByPdfium = true;
+        work = this.core.save(doc);
+      } finally {
+        this.core.close(doc);
+      }
+      file = PdfFile.load(work);
+    }
+    this.base = file;
+    this.baseBytes = work;
+    this.curBytes = work;
     this.rev = 0;
     this.edits.clear();
     this.lineGeo.clear();
@@ -88,7 +124,7 @@ export class EngineSession {
     const infos: PageInfo[] = [];
     const doc = this.pdfiumDoc();
     for (let i = 0; i < Math.min(doc.pageCount, this.pages.length); i++) infos.push(this.pageInfo(doc, i));
-    return { pages: infos, repaired: this.base.repaired, encrypted: this.base.encrypted };
+    return { pages: infos, repaired: this.base.repaired || repairedByPdfium, decrypted, restricted };
   }
 
   private closeDoc(): void {

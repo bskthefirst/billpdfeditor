@@ -14,8 +14,14 @@ export interface PageInfo {
 
 export interface DocInfo {
   pages: PageInfo[];
+  /** The file structure was damaged and had to be rebuilt. */
   repaired: boolean;
-  encrypted: boolean;
+  /** The file was encrypted; edits apply to an unprotected copy. */
+  decrypted: boolean;
+  /** The author restricted editing (permission flags); only meaningful when `decrypted`. */
+  restricted: boolean;
+  /** A password is required to open the file (retry `open` with one). */
+  needsPassword?: boolean;
 }
 
 export interface RunFont {
@@ -105,7 +111,7 @@ export interface EngineConfig {
 /** Methods the worker exposes (see engine/worker.ts). */
 export interface EngineApi {
   configure(config: EngineConfig): void;
-  open(bytes: ArrayBuffer): DocInfo;
+  open(bytes: ArrayBuffer, password?: string): DocInfo;
   getLines(page: number): LineInfo[];
   setLineText(lineId: string, text: string): Promise<SetTextResult>;
   resetLine(lineId: string): Promise<SetTextResult>;
