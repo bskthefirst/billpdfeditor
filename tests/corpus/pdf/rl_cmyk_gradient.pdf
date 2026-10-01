@@ -1,0 +1,127 @@
+%PDF-1.4
+%“Œ‹ž ReportLab Generated PDF document (opensource)
+1 0 obj
+<<
+/F1 2 0 R /F2 3 0 R /F3 4 0 R
+>>
+endobj
+2 0 obj
+<<
+/BaseFont /Helvetica /Encoding /WinAnsiEncoding /Name /F1 /Subtype /Type1 /Type /Font
+>>
+endobj
+3 0 obj
+<<
+/BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding /Name /F2 /Subtype /Type1 /Type /Font
+>>
+endobj
+4 0 obj
+<<
+/BaseFont /Times-Roman /Encoding /WinAnsiEncoding /Name /F3 /Subtype /Type1 /Type /Font
+>>
+endobj
+5 0 obj
+<<
+/ColorSpace /DeviceRGB /Coords [ 72 480 372 540 ] /Extend [false false] /Function 9 0 R /ShadingType 2
+>>
+endobj
+6 0 obj
+<<
+/Contents 11 0 R /MediaBox [ 0 0 612 792 ] /Parent 10 0 R /Resources <<
+/ExtGState <<
+/gRLs0 <<
+/ca .4
+>> /gRLs1 <<
+/ca 1
+>>
+>> /Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ] /Shading <<
+/Sh0 5 0 R
+>>
+>> /Rotate 0 /Trans <<
+
+>> 
+  /Type /Page
+>>
+endobj
+7 0 obj
+<<
+/PageMode /UseNone /Pages 10 0 R /Type /Catalog
+>>
+endobj
+8 0 obj
+<<
+/Author (anonymous) /CreationDate (D:20260930232046-04'00') /Creator (anonymous) /Keywords () /ModDate (D:20260930232046-04'00') /Producer (ReportLab PDF Library - \(opensource\)) 
+  /Subject (unspecified) /Title (Corpus: CMYK text, spot color, gradient, alpha) /Trapped /False
+>>
+endobj
+9 0 obj
+<<
+/C0 [ 1 0 0 ] /C1 [ 0 0 1 ] /Domain [ 0 1 ] /FunctionType 2 /N 1
+>>
+endobj
+10 0 obj
+<<
+/Count 1 /Kids [ 6 0 R ] /Type /Pages
+>>
+endobj
+11 0 obj
+<<
+/Length 644
+>>
+stream
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+0 0 0 1 k
+BT /F2 24 Tf 28.8 TL ET
+BT 1 0 0 1 72 720 Tm (Rich CMYK black heading \(0 0 0 1 k\)) Tj T* ET
+1 .8 0 0 k
+BT /F3 14 Tf 16.8 TL ET
+BT 1 0 0 1 72 690 Tm (CMYK blue body text that must stay CMYK in print workflows) Tj T* ET
+0 1 1 0 k
+n 72 600 200 60 re f*
+0 0 0 rg
+BT /F1 12 Tf 14.4 TL ET
+BT 1 0 0 1 72 570 Tm (Editable line next to a gradient and transparency) Tj T* ET
+q
+n 72 480 300 60 re W* n
+/Sh0 sh
+Q
+/gRLs0 gs
+0 .6 0 rg
+/gRLs1 gs
+n
+350 440 m
+350 467.6142 327.6142 490 300 490 c
+272.3858 490 250 467.6142 250 440 c
+250 412.3858 272.3858 390 300 390 c
+327.6142 390 350 412.3858 350 440 c
+f*
+ 
+endstream
+endobj
+xref
+0 12
+0000000000 65535 f 
+0000000061 00000 n 
+0000000112 00000 n 
+0000000219 00000 n 
+0000000331 00000 n 
+0000000440 00000 n 
+0000000564 00000 n 
+0000000841 00000 n 
+0000000910 00000 n 
+0000001209 00000 n 
+0000001295 00000 n 
+0000001355 00000 n 
+trailer
+<<
+/ID 
+[<b06d56d61c321ed892fd559f15ae0729><b06d56d61c321ed892fd559f15ae0729>]
+% ReportLab generated PDF document -- digest (opensource)
+
+/Info 8 0 R
+/Root 7 0 R
+/Size 12
+>>
+startxref
+2050
+%%EOF

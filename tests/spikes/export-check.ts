@@ -1,0 +1,11 @@
+import { readCorpus, writeOut } from '../helpers/node-core';
+import { makeSession } from '../helpers/node-session';
+const s = await makeSession();
+s.open(readCorpus('chrome_basic.pdf'));
+const id = s.getLines(0).find((r) => r.text.startsWith('Quarterly'))!.id;
+console.log(JSON.stringify(await s.setLineText(id, 'Annual Report 2026')));
+const para = s.getLines(0).find((r) => r.text.includes('quick'))!;
+console.log('para run:', JSON.stringify(para.text.slice(0, 40)), para.font.name);
+const r2 = await s.setLineText(para.id, para.text.replace('quick', 'swift'));
+console.log(JSON.stringify(r2));
+writeOut('export-check/edited.pdf', s.save());

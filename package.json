@@ -1,0 +1,52 @@
+{
+  "name": "sticker-pdf-lab",
+  "version": "2.0.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "description": "Sticker PDF Lab v2 \u2014 a free, private, in-browser PDF editor with font-faithful text editing.",
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "corpus": "python3 tests/corpus/build/build_corpus.py",
+    "fonts": "node scripts/fetch-fonts.mjs",
+    "corpus:external": "tests/corpus/build/fetch_external.sh"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@embedpdf/pdfium": "2.15.1",
+    "@fontsource/caveat": "^5.3.0",
+    "@fontsource/gaegu": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "fflate": "^0.8.3",
+    "harfbuzzjs": "^1.6.2",
+    "i18next": "^26.4.2",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-i18next": "^17.0.15",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.6.3",
+    "@types/pngjs": "^6.0.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0",
+    "prettier": "^3.9.9",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.3"
+  },
+  "packageManager": "pnpm@10.32.1"
+}

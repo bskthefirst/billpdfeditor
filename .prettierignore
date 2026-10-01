@@ -1,0 +1,6 @@
+legacy/
+node_modules/
+dist/
+tests/corpus/
+tests/out/
+pnpm-lock.yaml
