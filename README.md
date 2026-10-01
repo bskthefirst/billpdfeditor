@@ -3,7 +3,8 @@
 A free, private, in-browser PDF editor whose headline feature is **editing existing text in its original font and size**.
 Everything runs on your device — there is no server and no account.
 
-> Status: first implementation pass of the v2 rewrite (see `docs`/the plan below). The previous version lives in `legacy/`.
+> Status: first implementation pass of the v2 rewrite. The previous version lives in `legacy/` and keeps being published at
+> the site root; v2 is published at `/v2/` (see `.github/workflows/pages.yml`, including the one-time Pages setting it needs).
 
 ## What works today
 
