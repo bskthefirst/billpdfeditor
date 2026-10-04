@@ -5,7 +5,20 @@
  * worker but has no worker dependencies, so tests drive it directly in Node.
  */
 import { PdfiumCore, PdfiumOpenError, type Doc } from './core';
-import type { DocInfo, HistoryState, LineInfo, Mat6, PageInfo, RenderedPage, SetTextResult, Substitution, TextSelection } from './api';
+import type {
+  DocInfo,
+  HistoryState,
+  LineInfo,
+  Mat6,
+  PageInfo,
+  RenderedPage,
+  SearchHit,
+  SearchOptions,
+  SearchPage,
+  SetTextResult,
+  Substitution,
+  TextSelection,
+} from './api';
 import { PdfFile, type PdfPage } from '../pdf/file';
 import { TextExtractor, effectiveFontSize, type ContentUnit, type ShowOp } from '../pdf/text';
 import { commitUnitEdits, type ByteEdit, type SubstituteFont, type SubstituteSegment } from '../pdf/patch';
@@ -179,6 +192,7 @@ export class EngineSession {
   }
 
   save(): Uint8Array {
+    if (!this.curBytes) throw new Error('No PDF is open.');
     return this.curBytes;
   }
 
@@ -228,6 +242,37 @@ export class EngineSession {
       rects: this.core.selectionRects(tp, start, count).map((r) => [r.left, r.bottom, r.right, r.top]),
       text: this.core.textRange(tp, start, count),
     };
+  }
+
+  /** Searches `pageBudget` pages from `fromPage`; pages are opened and closed on the way so a long document stays cheap. */
+  search(query: string, options: SearchOptions = {}, fromPage = 0, pageBudget = 40): SearchPage {
+    const doc = this.pdfiumDoc();
+    const hits: SearchHit[] = [];
+    if (!query) return { hits, next: null };
+    const end = Math.min(doc.pageCount, fromPage + Math.max(1, pageBudget));
+    for (let p = Math.max(0, fromPage); p < end; p++) {
+      const page = this.core.loadPage(doc, p);
+      const tp = this.core.loadTextPage(page);
+      try {
+        const oneLine = (s: string) => s.replace(/[\r\n]+/g, ' ');
+        for (const m of this.core.findAll(tp, query, options)) {
+          const around = (from: number, count: number) => oneLine(this.core.textRange(tp, Math.max(0, from), count));
+          hits.push({
+            page: p,
+            start: m.start,
+            count: m.count,
+            rects: this.core.selectionRects(tp, m.start, m.count).map((r) => [r.left, r.bottom, r.right, r.top]),
+            before: around(m.start - 30, Math.min(30, m.start)),
+            text: oneLine(this.core.textRange(tp, m.start, m.count)),
+            after: around(m.start + m.count, 30),
+          });
+        }
+      } finally {
+        this.core.closeTextPage(tp);
+        this.core.closePage(page);
+      }
+    }
+    return { hits, next: end < doc.pageCount ? end : null };
   }
 
   expandSelection(page: number, index: number, unit: 'word' | 'line'): TextSelection {
