@@ -39,6 +39,13 @@ export interface FontInfo {
   italicAngle: number;
   embedded: boolean;
 }
+/** Where a bookmark or link lands on its page: PDF view mode (1 = XYZ, 2 = Fit, 3 = FitH … 8) with its parameters. */
+export interface DestView {
+  mode: number;
+  params: number[];
+  /** XYZ only: a missing value means "keep the current one". */
+  xyz?: { x: number | null; y: number | null; zoom: number | null };
+}
 export interface Doc {
   ptr: Ptr;
   /** Source buffer; PDFium reads lazily from it so it must outlive the document. */
@@ -61,7 +68,15 @@ export interface Bitmap {
 /** FPDF_LoadMemDocument failed; `needsPassword` when PDFium reports a password error (code 4). */
 export class PdfiumOpenError extends Error {
   constructor(readonly code: number) {
-    super(`FPDF_LoadMemDocument failed (error ${code})`);
+    super(
+      code === 3
+        ? 'This file is not a valid PDF, or it is too damaged to open.'
+        : code === 4
+          ? 'This PDF needs a password.'
+          : code === 5
+            ? 'This PDF uses a security setting that cannot be opened here.'
+            : `The PDF could not be opened (PDFium error ${code}).`,
+    );
   }
   get needsPassword(): boolean {
     return this.code === 4;
@@ -209,6 +224,182 @@ export class PdfiumCore {
       this.w.FPDF_PageToDevice(page.ptr, 0, 0, width, height, 0, x, y, p, p + 4);
       return [this.w.pdfium.getValue(p, 'i32'), this.w.pdfium.getValue(p + 4, 'i32')];
     });
+  }
+
+  // ───────────── page organization (copying pages between documents) ─────────────
+  /** A new empty document (no source buffer, so `bufPtr` is 0). */
+  createDocument(): Doc {
+    const ptr = this.w.FPDF_CreateNewDocument();
+    if (!ptr) throw new Error('FPDF_CreateNewDocument failed');
+    return { ptr, bufPtr: 0, pageCount: 0 };
+  }
+  pageCountOf(doc: Doc): number {
+    return this.w.FPDF_GetPageCount(doc.ptr);
+  }
+  /**
+   * Copies pages (0-based, repeats allowed) from `src` into `dest` starting at position `at`. PDFium copies the page
+   * objects as they are (content streams, fonts and images are not regenerated) and only what each page references.
+   */
+  importPages(dest: Doc, src: Doc, pages: number[], at: number): boolean {
+    if (!pages.length) return true;
+    return this.withAlloc(pages.length * 4, (p) => {
+      this.heaps.HEAPU32.set(pages, p >> 2);
+      return this.w.FPDF_ImportPagesByIndex(dest.ptr, src.ptr, p, pages.length, at);
+    });
+  }
+  newBlankPage(doc: Doc, index: number, width: number, height: number): void {
+    const page = this.w.FPDFPage_New(doc.ptr, index, width, height);
+    if (!page) throw new Error('FPDFPage_New failed');
+    this.w.FPDF_ClosePage(page);
+  }
+  deletePage(doc: Doc, index: number): void {
+    this.w.FPDFPage_Delete(doc.ptr, index);
+  }
+  /** The page's /Rotate in quarter turns (0–3). */
+  rotationOf(page: Page): number {
+    return this.w.FPDFPage_GetRotation(page.ptr);
+  }
+  setRotation(page: Page, quarterTurns: number): void {
+    this.w.FPDFPage_SetRotation(page.ptr, ((quarterTurns % 4) + 4) % 4);
+  }
+  /** The page's /Rotate in quarter turns (0–3) without loading the page. */
+  rotationByIndex(doc: Doc, index: number): number {
+    return this.w.EPDF_GetPageRotationByIndex(doc.ptr, index);
+  }
+  /** Displayed size (already rotated) without loading the page. */
+  pageSize(doc: Doc, index: number): { width: number; height: number } {
+    return this.withAlloc(8, (p) => {
+      if (!this.w.FPDF_GetPageSizeByIndexF(doc.ptr, index, p)) return { width: 612, height: 792 };
+      return { width: this.f32At(p), height: this.f32At(p + 4) };
+    });
+  }
+  metaText(doc: Doc, key: string): string {
+    return this.utf16z(this.readSized((b, n) => this.w.FPDF_GetMetaText(doc.ptr, key, b, n)));
+  }
+  setMetaText(doc: Doc, key: string, value: string): boolean {
+    const p = this.writeUtf16(value);
+    try {
+      return this.w.EPDF_SetMetaText(doc.ptr, key, p);
+    } finally {
+      this.free(p);
+    }
+  }
+  copyViewerPreferences(dest: Doc, src: Doc): boolean {
+    return this.w.FPDF_CopyViewerPreferences(dest.ptr, src.ptr);
+  }
+
+  /**
+   * Bookmarks in document order: title, 0-based target page (−1 when it points nowhere), nesting level (1 = top) and
+   * the destination view, so a copy can aim at the same spot on the page.
+   */
+  outline(doc: Doc): Array<{ title: string; page: number; level: number; view: DestView | null }> {
+    const out: Array<{ title: string; page: number; level: number; view: DestView | null }> = [];
+    const seen = new Set<Ptr>();
+    const walk = (parent: Ptr, level: number): void => {
+      for (let bm = this.w.FPDFBookmark_GetFirstChild(doc.ptr, parent); bm; bm = this.w.FPDFBookmark_GetNextSibling(doc.ptr, bm)) {
+        if (seen.has(bm) || out.length >= 20000) return; // damaged outlines can loop
+        seen.add(bm);
+        const title = this.utf16z(this.readSized((b, n) => this.w.FPDFBookmark_GetTitle(bm, b, n)));
+        const dest = this.w.FPDFBookmark_GetDest(doc.ptr, bm);
+        out.push({
+          title,
+          page: dest ? this.w.FPDFDest_GetDestPageIndex(doc.ptr, dest) : -1,
+          level,
+          view: dest ? this.destView(dest) : null,
+        });
+        if (level < 8) walk(bm, level + 1);
+      }
+    };
+    walk(0, 1);
+    return out;
+  }
+
+  private destView(dest: Ptr): DestView {
+    return this.withAlloc(64, (p) => {
+      const mode = this.w.FPDFDest_GetView(dest, p, p + 4);
+      const params = Array.from({ length: Math.min(this.u32At(p), 4) }, (_, i) => this.f32At(p + 4 + 4 * i));
+      let xyz: DestView['xyz'];
+      if (mode === 1 && this.w.FPDFDest_GetLocationInPage(dest, p + 24, p + 28, p + 32, p + 36, p + 40, p + 44)) {
+        xyz = {
+          x: this.u32At(p + 24) ? this.f32At(p + 36) : null,
+          y: this.u32At(p + 28) ? this.f32At(p + 40) : null,
+          zoom: this.u32At(p + 32) ? this.f32At(p + 44) : null,
+        };
+      }
+      return { mode, params, xyz };
+    });
+  }
+
+  /** Link annotations of a page in order, with the page and view they jump to inside the document (−1 / null elsewhere). */
+  links(doc: Doc, page: Page): Array<{ rect: [number, number, number, number]; destPage: number; view: DestView | null }> {
+    const out: Array<{ rect: [number, number, number, number]; destPage: number; view: DestView | null }> = [];
+    this.forEachLink(page, (link) => {
+      let rect: [number, number, number, number] = [0, 0, 0, 0];
+      this.withAlloc(16, (r) => {
+        if (this.w.FPDFLink_GetAnnotRect(link, r)) rect = [this.f32At(r), this.f32At(r + 4), this.f32At(r + 8), this.f32At(r + 12)];
+      });
+      let dest = this.w.FPDFLink_GetDest(doc.ptr, link);
+      if (!dest) {
+        const action = this.w.FPDFLink_GetAction(link);
+        if (action && this.w.FPDFAction_GetType(action) === 1 /* GoTo */) dest = this.w.FPDFAction_GetDest(doc.ptr, action);
+      }
+      out.push({ rect, destPage: dest ? this.w.FPDFDest_GetDestPageIndex(doc.ptr, dest) : -1, view: dest ? this.destView(dest) : null });
+    });
+    return out;
+  }
+
+  /** Points links (numbered as in `links`) at pages of the same document. */
+  retargetLinks(doc: Doc, page: Page, fixes: Map<number, { target: Page; view: DestView | null }>): number {
+    let done = 0;
+    let index = 0;
+    this.forEachLink(page, (link) => {
+      const fix = fixes.get(index++);
+      if (!fix) return;
+      const annot = this.w.FPDFLink_GetAnnot(page.ptr, link);
+      if (!annot) return;
+      try {
+        const action = this.w.EPDFAction_CreateGoTo(doc.ptr, this.createDest(fix.target, fix.view));
+        if (action && this.w.EPDFAnnot_SetAction(annot, action)) done++;
+      } finally {
+        this.w.FPDFPage_CloseAnnot(annot);
+      }
+    });
+    return done;
+  }
+
+  private forEachLink(page: Page, fn: (link: Ptr) => void): void {
+    this.withAlloc(8, (p) => {
+      this.u8.fill(0, p, p + 8);
+      for (let guard = 0; guard < 100000 && this.w.FPDFLink_Enumerate(page.ptr, p, p + 4); guard++) fn(this.u32At(p + 4));
+    });
+  }
+
+  private createDest(page: Page, view: DestView | null): Ptr {
+    if (view && view.mode >= 2 && view.mode <= 8) {
+      return this.withAlloc(16, (p) => {
+        this.heaps.HEAPF32.set(view.params.slice(0, 4), p >> 2);
+        return this.w.EPDFDest_CreateView(page.ptr, view.mode, p, Math.min(view.params.length, 4));
+      });
+    }
+    const v = view?.xyz;
+    return this.w.EPDFDest_CreateXYZ(page.ptr, v?.x != null, v?.x ?? 0, v?.y != null, v?.y ?? 0, v?.zoom != null, v?.zoom ?? 0);
+  }
+
+  /**
+   * Appends a bookmark (under `parent`, or at the top level when 0) that jumps to `page` of `doc`, with the same view
+   * as `view` when given. Returns the new bookmark handle.
+   */
+  addBookmark(doc: Doc, parent: Ptr, title: string, page: Page, view: DestView | null): Ptr {
+    const t = this.writeUtf16(title);
+    try {
+      const bm = parent ? this.w.EPDFBookmark_AppendChild(doc.ptr, parent, t) : this.w.EPDFBookmark_Create(doc.ptr, t);
+      if (!bm) throw new Error('could not create bookmark');
+      const dest = this.createDest(page, view);
+      if (dest) this.w.EPDFBookmark_SetDest(doc.ptr, bm, dest);
+      return bm;
+    } finally {
+      this.free(t);
+    }
   }
 
   // ───────────── rendering ─────────────
@@ -367,6 +558,31 @@ export class PdfiumCore {
       }
     });
     return out;
+  }
+  /** Matches of `query` on a text page as (character index, length) in PDFium's reading-order indices. */
+  findAll(
+    tp: Ptr,
+    query: string,
+    opts: { matchCase?: boolean; wholeWord?: boolean } = {},
+    limit = 5000,
+  ): Array<{ start: number; count: number }> {
+    if (!query) return [];
+    const q = this.writeUtf16(query);
+    try {
+      const h = this.w.FPDFText_FindStart(tp, q, (opts.matchCase ? 1 : 0) | (opts.wholeWord ? 2 : 0), 0);
+      if (!h) return [];
+      try {
+        const out: Array<{ start: number; count: number }> = [];
+        while (out.length < limit && this.w.FPDFText_FindNext(h)) {
+          out.push({ start: this.w.FPDFText_GetSchResultIndex(h), count: this.w.FPDFText_GetSchCount(h) });
+        }
+        return out;
+      } finally {
+        this.w.FPDFText_FindClose(h);
+      }
+    } finally {
+      this.free(q);
+    }
   }
   /** Extracted text for a character range (PDFium inserts \r\n between lines and spaces between words). */
   textRange(tp: Ptr, start: number, count: number): string {

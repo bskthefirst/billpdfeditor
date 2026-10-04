@@ -17,6 +17,11 @@ Everything runs on your device — there is no server and no account.
 - **Real text selection and copy** (drag, double-click a word, triple-click a line, ⌘/Ctrl+C), powered by PDFium's
   reading-order logic.
 - Undo / redo, save (a byte-minimal incremental update: everything you didn't touch is byte-identical).
+- **Pages & Split.** A page grid to reorder (drag), rotate, delete, duplicate, insert blank pages and add pages from other
+  PDFs (merge); **Split** by ranges (`1-3, 7, 9-12`, `5-`, `odd`, `last`…), every N pages, by bookmarks or the selected pages, as
+  separate files or one ZIP. Pages are copied *exactly* (fonts, images and text are the same objects, nothing is re-rendered),
+  text edits made before splitting are included, and bookmarks, internal links and hidden layers are carried over.
+  "Save clean copy" rewrites the whole file so older versions of edited text are gone from it.
 - **Protected PDFs.** Files with an owner password or editing restrictions open and are edited as an unprotected copy (the app
   tells you when the author restricted editing); files that need a password ask for it. Damaged files are rebuilt by PDFium first.
 
@@ -53,11 +58,25 @@ Verification highlights (all in `tests/`): a word replaced with the real Georgia
 same HTML **pixel for pixel**; 261/262 patched PDFs from a hostile corpus are pixel-identical outside the edit; 819/819
 no-op incremental updates render identically; line-edit geometry is checked against PDFium's independent glyph positions.
 
+### Pages & Split under the hood
+
+`src/engine/pages.ts` builds a new PDF from a list of pages (`{src, page, rotate}` or blank) with PDFium's page import, which
+clones page objects instead of regenerating them. PDFium drops some document-level data, which we restore: bookmarks
+(recreated with the same nesting and view, re-aimed at the new page numbers), links to pages that moved (`restoreLinks`), and
+the layer configuration of PDFs with optional content (`src/engine/carry.ts` maps old objects to their copies by walking the
+original page and its copy side by side). Not carried over: tagged-PDF structure, AcroForm fields, page labels, named destinations.
+Range syntax and file naming are pure functions in `src/organize/` (`ranges.ts`, `split.ts`), covered by `tests/organize.test.ts`.
+
+Verification (`tests/pages.test.ts`, `tests/spikes/pages-corpus.ts`, `tests/spikes/pages-user.ts`): over the 910 hostile PDFs,
+997 of 999 sampled single-page copies and 887 of 889 whole-document copies render pixel-identically to the originals; the rest
+are two files with non-embedded fonts (PDFium renders even *identical bytes* differently across document loads) and one
+file whose page tree loops. Outputs also open cleanly in poppler and pypdf.
+
 ## Known limits (next on the list)
 
 Paragraph wrapping/re-justification, text inside shared form XObjects (copy-on-write), ligature glyphs, vertical writing,
-Type 3 fonts, exact font matching through the Local Font Access API, and everything in the roadmap beyond
-text editing (organize/convert tools).
+Type 3 fonts, exact font matching through the Local Font Access API, and the rest of the roadmap beyond text editing and
+page organizing (image/PDF conversion, compression, password protection, find & replace, OCR).
 
 ## License
 

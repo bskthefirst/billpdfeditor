@@ -27,7 +27,7 @@ export function createEngine(): {
     get:
       (_t, method: string) =>
       (...args: unknown[]) =>
-        call(method, args, method === 'open' ? [args[0] as ArrayBuffer] : []),
+        call(method, args, method === 'open' || method === 'openSource' ? [args[0] as ArrayBuffer] : []),
   });
   return { api, terminate: () => worker.terminate() };
 }

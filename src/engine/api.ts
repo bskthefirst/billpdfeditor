@@ -103,6 +103,64 @@ export interface TextSelection {
   text: string;
 }
 
+/** A bookmark flattened in document order (`page` is 0-based, −1 when it points nowhere; `level` 1 = top). */
+export interface OutlineEntry {
+  title: string;
+  page: number;
+  level: number;
+}
+
+/** A PDF the page tools can copy pages from: the open document (edits applied) or any other file. */
+export interface SourceInfo {
+  /** Handle for `renderSource`, `outline` and `buildPdf`; 0 when the file could not be opened. */
+  id: number;
+  name: string;
+  /** Displayed size of every page in points (already rotated) and the page's own /Rotate in degrees. */
+  pages: Array<{ width: number; height: number; rotate: number }>;
+  /** The file was encrypted; pages are copied into an unprotected file. */
+  decrypted: boolean;
+  /** The author restricted editing (permission flags); only meaningful when `decrypted`. */
+  restricted: boolean;
+  /** A password is required (retry `openSource` with one). */
+  needsPassword?: boolean;
+}
+
+/** One page of a PDF to build: a page of a source (optionally turned further) or a new blank page. */
+export type PageSpec =
+  | { kind: 'page'; src: number; page: number; /** extra clockwise turn in degrees (multiple of 90) */ rotate?: number }
+  | { kind: 'blank'; width: number; height: number };
+
+export interface BuildOptions {
+  /** Keep bookmarks that point at pages in the new file (default true). */
+  bookmarks?: boolean;
+  /** Title for the new file; defaults to the first source's title. */
+  title?: string;
+}
+
+export interface SearchOptions {
+  matchCase?: boolean;
+  wholeWord?: boolean;
+}
+
+export interface SearchHit {
+  page: number;
+  /** Character range in PDFium's reading-order indices (the same indices `select` takes). */
+  start: number;
+  count: number;
+  /** Highlight rectangles in user space: [x0, y0, x1, y1] with y0 < y1. */
+  rects: Array<[number, number, number, number]>;
+  /** The matched text with a little context on each side (single line). */
+  before: string;
+  text: string;
+  after: string;
+}
+
+export interface SearchPage {
+  hits: SearchHit[];
+  /** First page that has not been searched yet, or null when the whole document is done. */
+  next: number | null;
+}
+
 export interface EngineConfig {
   /** Absolute URL of the folder that holds the fallback fonts (public/fonts). */
   fontsBase: string;
@@ -123,8 +181,25 @@ export interface EngineApi {
   hitChar(page: number, x: number, y: number): number;
   /** Selection between two character indices (inclusive, any order). */
   select(page: number, a: number, b: number): TextSelection;
+  /**
+   * Finds `query` in the current document (edits included), `pageBudget` pages at a time starting at `fromPage`, so the
+   * UI can show results while a long document is still being searched.
+   */
+  search(query: string, options?: SearchOptions, fromPage?: number, pageBudget?: number): SearchPage;
   /** Word or line around a character index (for double / triple click). */
   expandSelection(page: number, index: number, unit: 'word' | 'line'): TextSelection;
   save(): ArrayBuffer;
   revision(): number;
+
+  // Page tools: copy, reorder, rotate and split pages without re-rendering anything (see engine/pages.ts).
+  /** Registers a PDF as a page source; the buffer is transferred. */
+  openSource(bytes: ArrayBuffer, name: string, password?: string): SourceInfo;
+  /** Registers the open document, with every pending text edit applied, as a page source. */
+  snapshotSource(name: string): SourceInfo;
+  closeSource(id: number): void;
+  /** Renders any page of a source (thumbnails). */
+  renderSource(src: number, page: number, scale: number): RenderedPage;
+  outline(src: number): OutlineEntry[];
+  /** Builds a new PDF from the listed pages, in order. Pages are copied exactly; nothing is regenerated. */
+  buildPdf(pages: PageSpec[], options?: BuildOptions): ArrayBuffer;
 }
