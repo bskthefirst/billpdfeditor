@@ -1,74 +1,91 @@
-import { useCallback, useEffect, useRef } from 'react';
-import { engine } from './engine/instance';
+import { useEffect, useLayoutEffect, useRef } from 'react';
+import { openFile, openSample, redoCommand, switchView, undoCommand, undoPageChanges } from './state/actions';
+import { addPdfFiles, hasChanges, useOrganize } from './state/organize';
+import { openSplit, useSplit } from './state/split';
 import { useApp } from './state/store';
-import { redo, undo } from './state/actions';
+import { LeaveDialog } from './ui/LeaveDialog';
 import { PageView } from './ui/PageView';
+import { PagesToolbar } from './ui/PagesToolbar';
+import { PagesView } from './ui/PagesView';
+import { SaveMenu } from './ui/SaveMenu';
+import { SplitDialog } from './ui/SplitDialog';
+import { thumbs } from './ui/thumbs';
 
 const SAMPLES = [
   { file: 'quarterly-report.pdf', label: 'Quarterly report (Chrome · Georgia/Arial · Korean)' },
   { file: 'embedded-fonts.pdf', label: 'Embedded TrueType subsets' },
+  { file: 'study-guide.pdf', label: 'Study guide (24 pages · bookmarks · try Pages & Split)' },
 ];
 
+const TEXT = {
+  tagline: 'v2 preview · edit text in its original font · organize & split pages',
+  open: '📂 Open PDF',
+  samples: '🧪 Samples…',
+  openSample: 'Open a sample',
+  viewGroup: 'View',
+  edit: '✏️ Edit',
+  editTip: 'Edit text in the document',
+  pages: '🗂️ Pages',
+  pagesTip: 'Rearrange, rotate, delete and add pages',
+  pagesBusy: 'Wait for the page change to finish',
+  toolGroup: 'Tool',
+  select: '🎯 Select text',
+  editText: '📝 Edit text',
+  undo: 'Undo',
+  undoTip: 'Undo (⌘Z)',
+  redo: 'Redo',
+  redoTip: 'Redo (⇧⌘Z)',
+  undoPages: '↩ Undo page changes',
+  undoPagesTip: 'Go back to the document as it was before you applied your page changes',
+  zoomOut: 'Zoom out',
+  zoomIn: 'Zoom in',
+  fit: 'Fit',
+  split: '✂️ Split',
+  splitTip: 'Split into several PDFs: by page ranges, every N pages, or bookmarks',
+  emptyTitle: 'Drop a PDF here',
+  emptyBody:
+    'Everything stays on your device. Click a word, type, and the new text is drawn with the document’s own font. Pages and Split rearrange, merge and cut the file apart without re-rendering anything.',
+  trySample: 'Try the sample',
+  tryGuide: 'Try Pages & Split',
+};
+
 export default function App() {
-  const { doc, fileName, zoom, tool, status, dirty, canUndo, canRedo } = useApp();
-  const { setZoom, setTool, setStatus } = useApp.getState();
+  const { doc, fileName, zoom, tool, status, dirty, canUndo, canRedo, view, generation, preApply } = useApp();
+  const { setZoom, setTool } = useApp.getState();
+  const pagesBusy = useOrganize((s) => s.busy !== null);
+  const pagesChanged = useOrganize((s) => hasChanges(s));
+  const pagesReady = useOrganize((s) => s.phase === 'ready');
   const scroller = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-
-  const openBytes = useCallback(async (buf: ArrayBuffer, name: string) => {
-    useApp.getState().setStatus('Opening…');
-    try {
-      // the buffer is transferred to the worker, so keep a copy for password retries
-      const spare = buf.slice(0);
-      let info = await engine.api.open(buf, '');
-      for (let attempt = 0; info.needsPassword && attempt < 3; attempt++) {
-        const pw = window.prompt(attempt ? 'Wrong password. Try again:' : `“${name}” is password-protected. Password:`);
-        if (pw === null) {
-          useApp.getState().setStatus('Open cancelled — the PDF needs a password.', 'warn');
-          return;
-        }
-        info = await engine.api.open(spare.slice(0), pw);
-      }
-      if (info.needsPassword) {
-        useApp.getState().setStatus('That password did not open the PDF.', 'error');
-        return;
-      }
-      useApp.getState().setDoc(name, info);
-      const pages = `${info.pages.length} page${info.pages.length === 1 ? '' : 's'} loaded`;
-      useApp
-        .getState()
-        .setStatus(
-          info.decrypted
-            ? `${pages}. This PDF was protected${info.restricted ? ' and its author restricted editing' : ''}; edits are saved to an unprotected copy, so only edit documents you are allowed to change.`
-            : `${pages}${info.repaired ? ' (file structure was repaired)' : ''}. Click any text to edit it.`,
-          info.restricted ? 'warn' : 'ok',
-        );
-    } catch (e) {
-      useApp.getState().setStatus(`Could not open this PDF: ${e instanceof Error ? e.message : e}`, 'error');
-    }
-  }, []);
-
-  const openSample = useCallback(
-    async (file: string) => {
-      const res = await fetch(`./samples/${file}`);
-      await openBytes(await res.arrayBuffer(), file);
-    },
-    [openBytes],
-  );
+  const editScroll = useRef(0);
+  const lastGeneration = useRef(generation);
+  const autoOpened = useRef(false);
 
   useEffect(() => {
+    // StrictMode runs effects twice in development; a ref keeps the sample from being opened twice
+    if (autoOpened.current) return;
+    autoOpened.current = true;
     const sample = new URLSearchParams(location.search).get('sample');
-    if (sample) void openSample(`${sample}.pdf`);
-  }, [openSample]);
+    if (sample) openSample(`${sample}.pdf`);
+  }, []);
 
-  // ⌘/Ctrl+Z undo, ⇧⌘/Ctrl+Z or Ctrl+Y redo. Handled for the document, including while typing in the editor,
-  // so the browser's own per-textarea undo never fights the engine's history.
+  // Debug handles for devtools and the automated browser checks (dev builds only; main.tsx adds engine and useApp).
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const lab = ((window as unknown as { __lab?: Record<string, unknown> }).__lab ??= {});
+    Object.assign(lab, { organize: useOrganize, split: useSplit, thumbs });
+  }, []);
+
+  // ⌘/Ctrl+Z undo, ⇧⌘/Ctrl+Z or Ctrl+Y redo. Handled for the document, including while typing in the editor, so the
+  // browser's own per-textarea undo never fights the engine's history. In Pages mode they act on the page list instead.
+  // Dialogs keep the browser's own undo for their text fields.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      if (e.target instanceof Element && e.target.closest('[role="dialog"]')) return;
       const k = e.key.toLowerCase();
-      if (k === 'z' && !e.shiftKey) void undo();
-      else if ((k === 'z' && e.shiftKey) || k === 'y') void redo();
+      if (k === 'z' && !e.shiftKey) undoCommand();
+      else if ((k === 'z' && e.shiftKey) || k === 'y') redoCommand();
       else return;
       e.preventDefault();
     };
@@ -92,19 +109,23 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const onFile = async (f: File | undefined | null) => {
-    if (f) await openBytes(await f.arrayBuffer(), f.name);
+  // Back in the editor (Discard, or Apply of a different page count) the page list is where it was left, or at the top for
+  // a different document.
+  useLayoutEffect(() => {
+    if (view !== 'edit' || !scroller.current) return;
+    scroller.current.scrollTop = lastGeneration.current === generation ? editScroll.current : 0;
+    lastGeneration.current = generation;
+  }, [view, generation]);
+
+  const changeView = (next: 'edit' | 'pages') => {
+    if (view === 'edit' && scroller.current) editScroll.current = scroller.current.scrollTop;
+    switchView(next);
   };
 
-  const save = async () => {
-    const bytes = await engine.api.save();
-    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName.replace(/\.pdf$/i, '') + '-edited.pdf';
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-    setStatus('Saved. Only the edited text was rewritten; everything else is byte-identical.', 'ok');
+  const onFiles = (files: File[]) => {
+    if (!files.length) return;
+    if (useApp.getState().view === 'pages') void addPdfFiles(files);
+    else openFile(files[0]);
   };
 
   const fit = () => {
@@ -113,100 +134,163 @@ export default function App() {
     setZoom((scroller.current.clientWidth - 64) / w);
   };
 
+  const inPages = view === 'pages';
   return (
     <div
       className="app"
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
-        void onFile(e.dataTransfer.files[0]);
+        onFiles(Array.from(e.dataTransfer.files));
       }}
     >
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-sticker" aria-hidden="true">
-            📄
-          </span>
-          <div>
-            <h1>Sticker PDF Lab</h1>
-            <p>v2 preview · edit text in its original font</p>
+        <div className="topbar-row">
+          <div className="brand">
+            <span className="brand-sticker" aria-hidden="true">
+              📄
+            </span>
+            <div>
+              <h1>Sticker PDF Lab</h1>
+              <p>{TEXT.tagline}</p>
+            </div>
+          </div>
+          <div className="actions">
+            <div className="group">
+              <button className="btn primary" onClick={() => fileInput.current?.click()} disabled={pagesBusy}>
+                {TEXT.open}
+              </button>
+              <input
+                ref={fileInput}
+                type="file"
+                accept="application/pdf"
+                hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = ''; // picking the same file again must still open it
+                  if (f) openFile(f);
+                }}
+              />
+              <select
+                className="btn"
+                aria-label={TEXT.openSample}
+                value=""
+                disabled={pagesBusy}
+                onChange={(e) => e.target.value && openSample(e.target.value)}
+              >
+                <option value="">{TEXT.samples}</option>
+                {SAMPLES.map((s) => (
+                  <option key={s.file} value={s.file}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="group seg mode" role="group" aria-label={TEXT.viewGroup}>
+              <button
+                className={!inPages ? 'on' : ''}
+                aria-pressed={!inPages}
+                onClick={() => changeView('edit')}
+                disabled={pagesBusy}
+                title={TEXT.editTip}
+              >
+                {TEXT.edit}
+              </button>
+              <button
+                className={inPages ? 'on' : ''}
+                aria-pressed={inPages}
+                onClick={() => changeView('pages')}
+                disabled={!doc || pagesBusy}
+                title={pagesBusy ? TEXT.pagesBusy : TEXT.pagesTip}
+              >
+                {TEXT.pages}
+              </button>
+            </div>
+            {!inPages && (
+              <>
+                <div className="group seg" role="group" aria-label={TEXT.toolGroup}>
+                  <button className={tool === 'select' ? 'on' : ''} onClick={() => setTool('select')}>
+                    {TEXT.select}
+                  </button>
+                  <button className={tool === 'edit' ? 'on' : ''} onClick={() => setTool('edit')}>
+                    {TEXT.editText}
+                  </button>
+                </div>
+                <div className="group">
+                  <button className="btn icon" onClick={undoCommand} disabled={!canUndo} aria-label={TEXT.undo} title={TEXT.undoTip}>
+                    ↩
+                  </button>
+                  <button className="btn icon" onClick={redoCommand} disabled={!canRedo} aria-label={TEXT.redo} title={TEXT.redoTip}>
+                    ↪
+                  </button>
+                </div>
+                <div className="group">
+                  <button className="btn icon" onClick={() => setZoom(zoom / 1.15)} aria-label={TEXT.zoomOut}>
+                    −
+                  </button>
+                  <span className="zoom">{Math.round(zoom * 100)}%</span>
+                  <button className="btn icon" onClick={() => setZoom(zoom * 1.15)} aria-label={TEXT.zoomIn}>
+                    +
+                  </button>
+                  <button className="btn" onClick={fit} disabled={!doc}>
+                    {TEXT.fit}
+                  </button>
+                </div>
+              </>
+            )}
+            <div className="group">
+              <button
+                className="btn"
+                onClick={(e) => void openSplit(e.currentTarget)}
+                disabled={!doc || (inPages && !pagesReady) || pagesBusy}
+                title={TEXT.splitTip}
+              >
+                {TEXT.split}
+              </button>
+            </div>
+            <SaveMenu disabled={!doc} dirty={dirty} blocked={inPages && (pagesChanged || pagesBusy)} />
           </div>
         </div>
-        <div className="actions">
-          <div className="group">
-            <button className="btn primary" onClick={() => fileInput.current?.click()}>
-              📂 Open PDF
-            </button>
-            <input ref={fileInput} type="file" accept="application/pdf" hidden onChange={(e) => void onFile(e.target.files?.[0])} />
-            <select className="btn" aria-label="Open a sample" value="" onChange={(e) => e.target.value && void openSample(e.target.value)}>
-              <option value="">🧪 Samples…</option>
-              {SAMPLES.map((s) => (
-                <option key={s.file} value={s.file}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="group seg" role="group" aria-label="Tool">
-            <button className={tool === 'select' ? 'on' : ''} onClick={() => setTool('select')}>
-              🎯 Select text
-            </button>
-            <button className={tool === 'edit' ? 'on' : ''} onClick={() => setTool('edit')}>
-              📝 Edit text
-            </button>
-          </div>
-          <div className="group">
-            <button className="btn icon" onClick={() => void undo()} disabled={!canUndo} aria-label="Undo" title="Undo (⌘Z)">
-              ↩
-            </button>
-            <button className="btn icon" onClick={() => void redo()} disabled={!canRedo} aria-label="Redo" title="Redo (⇧⌘Z)">
-              ↪
-            </button>
-          </div>
-          <div className="group">
-            <button className="btn icon" onClick={() => setZoom(zoom / 1.15)} aria-label="Zoom out">
-              −
-            </button>
-            <span className="zoom">{Math.round(zoom * 100)}%</span>
-            <button className="btn icon" onClick={() => setZoom(zoom * 1.15)} aria-label="Zoom in">
-              +
-            </button>
-            <button className="btn" onClick={fit} disabled={!doc}>
-              Fit
-            </button>
-          </div>
-          <div className="group">
-            <button className="btn accent" onClick={() => void save()} disabled={!doc}>
-              💾 Save{dirty ? ' •' : ''}
-            </button>
-          </div>
-        </div>
+        {inPages && <PagesToolbar />}
       </header>
-      <main className="stage" ref={scroller}>
+      <main className={`stage${inPages ? ' stage-pages' : ''}`} ref={scroller}>
         {!doc && (
           <div className="empty">
             <div className="empty-card">
               <span className="empty-emoji">📎</span>
-              <h2>Drop a PDF here</h2>
-              <p>Everything stays on your device. Click a word, type, and the new text is drawn with the document’s own font.</p>
-              <button className="btn primary" onClick={() => void openSample(SAMPLES[0].file)}>
-                Try the sample
-              </button>
+              <h2>{TEXT.emptyTitle}</h2>
+              <p>{TEXT.emptyBody}</p>
+              <div className="empty-actions">
+                <button className="btn primary" onClick={() => openSample(SAMPLES[0].file)}>
+                  {TEXT.trySample}
+                </button>
+                <button className="btn" onClick={() => openSample('study-guide.pdf')}>
+                  {TEXT.tryGuide}
+                </button>
+              </div>
             </div>
           </div>
         )}
-        {doc && (
+        {doc && !inPages && (
           <div className="pages">
             {doc.pages.map((p) => (
-              <PageView key={p.index} info={p} />
+              <PageView key={`${generation}:${p.index}`} info={p} />
             ))}
           </div>
         )}
+        {doc && inPages && <PagesView />}
       </main>
       <footer className={`status ${status.kind}`} role="status" aria-live="polite">
         <span>{status.text}</span>
+        {preApply && !inPages && (
+          <button className="btn small" onClick={() => void undoPageChanges()} title={TEXT.undoPagesTip}>
+            {TEXT.undoPages}
+          </button>
+        )}
         {fileName && <span className="file">{fileName}</span>}
       </footer>
+      <SplitDialog />
+      <LeaveDialog />
     </div>
   );
 }
